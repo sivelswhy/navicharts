@@ -28,6 +28,9 @@ Production : `npm run build && npm start` (port 4173, modifiable via `PORT`).
 | Balises en route, points de report, routes RNAV, espaces aériens | eAIP France ENR 4.1, 4.4, 3.2, 2.1, [SIA](https://www.sia.aviation-civile.gouv.fr/) | © SIA/DGAC |
 | Cartes IFR (ADC, SID, STAR, IAC…) | eAIP France, [SIA](https://www.sia.aviation-civile.gouv.fr/) | © SIA/DGAC |
 | Cartes VAC | Atlas VAC, SIA | © SIA/DGAC |
+| NOTAM | [SOFIA-Briefing](https://sofia-briefing.aviation-civile.gouv.fr), SIA/DGAC (bulletin d'aérodrome, sans compte, cache 10 min) | Licence Ouverte Etalab 2.0 |
+| METAR | [aviationweather.gov](https://aviationweather.gov) (NOAA) | Domaine public |
+| Trafic et ATIS | [IVAO](https://www.ivao.aero) (API whazzup publique) | Conditions IVAO |
 | Plan au sol : taxiways, aires de trafic, points d'attente, postes | OpenStreetMap via [Overpass](https://overpass-api.de/) (à la demande, cache 30 jours dans `.cache/ground`) | ODbL |
 | Désignations de piste (08L, 26R…) | Seuils OurAirports | Domaine public |
 | Fond de carte (style clair sur mesure, `src/lib/mapStyle.ts`) | [OpenFreeMap](https://openfreemap.org/) / OpenStreetMap | ODbL |

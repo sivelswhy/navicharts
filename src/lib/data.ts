@@ -61,6 +61,28 @@ export async function fetchAutoGeoref(chartUrl: string, airport?: Airport): Prom
   return (await getJson<{ georef: AutoGeoref | null }>(`/api/georef?${params}`)).georef;
 }
 
+export interface Notam {
+  id: string;
+  number: string;
+  type: string;
+  category: string;
+  start: string | null;
+  end: string | null;
+  estimated: boolean;
+  schedule: string | null;
+  text: string;
+  /** Traduction française (NOTAM émis en France) */
+  textFr: string | null;
+  lower: string | null;
+  upper: string | null;
+}
+
+export type NotamResult = { status: 'ok'; source: string; issued: string | null; notams: Notam[] } | { status: 'error'; message: string };
+
+export function fetchNotams(icao: string): Promise<NotamResult> {
+  return getJson(`/api/notams/${icao}`);
+}
+
 export function pdfUrl(chartUrl: string): string {
   return `/api/pdf?url=${encodeURIComponent(chartUrl)}`;
 }

@@ -6,6 +6,7 @@ import { computeGeoref, type GeorefResult } from './georef.ts';
 import { getGround } from './ground.ts';
 import { getAtis, getPilot, getTraffic } from './ivao.ts';
 import { getMetars } from './metar.ts';
+import { getNotams } from './notam.ts';
 import { getProcedures } from './procedures.ts';
 import { CHART_HOSTS, getCharts } from './charts.ts';
 
@@ -127,6 +128,13 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
       } catch (err) {
         sendJson(res, 503, { error: err instanceof Error ? err.message : 'IVAO indisponible' });
       }
+      return true;
+    }
+
+    // NOTAM d'un aérodrome (API FAA, identifiants dans .env)
+    const notams = url.pathname.match(/^\/api\/notams\/([A-Z0-9]{4})$/);
+    if (notams) {
+      sendJson(res, 200, await getNotams(notams[1]));
       return true;
     }
 

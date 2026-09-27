@@ -3,3 +3,4 @@ dist
 .cache
 public/data
 .DS_Store
+.env

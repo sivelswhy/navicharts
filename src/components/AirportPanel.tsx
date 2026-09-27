@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CATEGORY_LABELS, CHART_GROUPS, GROUP_LABELS, GROUP_OF, groupColor, type ChartGroup } from '../lib/chartGroups.ts';
-import { fetchCharts, loadDetails } from '../lib/data.ts';
+import { fetchCharts, fetchNotams, loadDetails, type Notam, type NotamResult } from '../lib/data.ts';
 import { useIvaoAtis, useMetars } from '../lib/metar.ts';
 import type { Airport, AirportCharts, AirportDetails, Chart, ChartCategory } from '../lib/types.ts';
 import { IconClose, IconExternal, IconOverlay, IconPin } from './icons.tsx';
@@ -17,7 +17,34 @@ const TYPE_LABELS: Record<Airport['type'], string> = {
 // Ordre des catégories à l'intérieur d'un groupe
 const CATEGORY_ORDER: ChartCategory[] = ['VAC', 'GROUND', 'SID', 'STAR', 'APPROACH', 'OTHER', 'DATA'];
 
-type Tab = ChartGroup | 'INFO';
+type Tab = ChartGroup | 'INFO' | 'NOTAM';
+
+const utc = (iso: string) =>
+  `${new Date(iso).toLocaleString('fr-FR', { timeZone: 'UTC', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} UTC`;
+
+/** Texte du NOTAM : traduction française quand elle existe, avec accès au texte original */
+function NotamText({ notam }: { notam: Notam }) {
+  const [original, setOriginal] = useState(false);
+  const text = notam.textFr && !original ? notam.textFr : notam.text;
+  return (
+    <>
+      <p className="notam-text">{text}</p>
+      {notam.textFr && (
+        <button className="link-button notam-toggle" onClick={() => setOriginal((o) => !o)}>
+          {original ? 'Voir la traduction française' : 'Voir le texte original'}
+        </button>
+      )}
+    </>
+  );
+}
+
+/** NOTAM encore valables : ceux en vigueur d'abord, puis à venir par date de début */
+function currentNotams(notams: Notam[], now = Date.now()): { notam: Notam; active: boolean }[] {
+  return notams
+    .filter((n) => !n.end || new Date(n.end).getTime() > now)
+    .map((notam) => ({ notam, active: !notam.start || new Date(notam.start).getTime() <= now }))
+    .sort((a, b) => Number(b.active) - Number(a.active) || (a.notam.start ?? '').localeCompare(b.notam.start ?? ''));
+}
 
 interface Props {
   airport: Airport;
@@ -38,6 +65,7 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
   const [tab, setTab] = useState<Tab | null>(null);
   const [details, setDetails] = useState<AirportDetails | null>(null);
   const [charts, setCharts] = useState<ChartsState>({ status: 'loading' });
+  const [notams, setNotams] = useState<NotamResult | 'loading' | null>(null);
   const metar = useMetars(airport.icao ? [airport.icao] : [])[airport.icao];
   const atis = useIvaoAtis(airport.icao || null);
 
@@ -46,6 +74,13 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
     setDetails(null);
     setTab(null);
     loadDetails(airport).then((d) => !cancelled && setDetails(d));
+    setNotams(airport.icao ? 'loading' : null);
+    if (airport.icao) {
+      fetchNotams(airport.icao).then(
+        (r) => !cancelled && setNotams(r),
+        () => !cancelled && setNotams({ status: 'error', message: 'Service NOTAM injoignable' }),
+      );
+    }
 
     if (!airport.icao) {
       setCharts({ status: 'ok', data: { icao: '', airac: '', effective: '', charts: [], sourceUrl: null, provider: null } });
@@ -114,6 +149,54 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
         <ul className="chart-list">{items.filter((c) => c.category === cat).map(renderChart)}</ul>
       </section>
     ));
+  };
+
+  const notamList = notams && notams !== 'loading' && notams.status === 'ok' ? currentNotams(notams.notams) : [];
+
+  const renderNotams = () => {
+    if (notams === 'loading') return <p className="placeholder">Chargement des NOTAM…</p>;
+    if (!notams) return <p className="placeholder">Ce terrain n’a pas d’indicatif OACI : pas de NOTAM.</p>;
+    if (notams.status === 'error') return <p className="placeholder error">NOTAM indisponibles : {notams.message}.</p>;
+    const source = (
+      <p className="footnote notam-source">
+        Source : {notams.source}
+        {notams.issued ? `, bulletin du ${utc(notams.issued)}` : ''}. Données non certifiées.
+      </p>
+    );
+    if (!notamList.length) {
+      return (
+        <>
+          <p className="placeholder">Aucun NOTAM en vigueur ou à venir pour cet aérodrome.</p>
+          {source}
+        </>
+      );
+    }
+    return (
+      <>
+      <ul className="notam-list">
+        {notamList.map(({ notam, active }) => (
+          <li key={notam.id} className="notam">
+            <header>
+              <strong>{notam.number}</strong>
+              <span className="notam-category">{notam.category}</span>
+              <span className={active ? 'notam-state active' : 'notam-state'}>{active ? 'En vigueur' : 'À venir'}</span>
+            </header>
+            <p className="notam-validity">
+              {notam.start ? `Du ${utc(notam.start)}` : 'En vigueur'} {notam.end ? `au ${utc(notam.end)}${notam.estimated ? ' (estimé)' : ''}` : '· permanent'}
+            </p>
+            {notam.schedule && <p className="notam-validity">Horaires : {notam.schedule}</p>}
+            <NotamText notam={notam} />
+            {(notam.lower || notam.upper) && (
+              <p className="notam-validity">
+                Limites : {notam.lower ?? '—'} → {notam.upper ?? '—'}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+      {source}
+      </>
+    );
   };
 
   const renderInfo = () => {
@@ -250,6 +333,17 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
         })}
         <button
           role="tab"
+          aria-selected={activeTab === 'NOTAM'}
+          className={activeTab === 'NOTAM' ? 'group-tab on' : 'group-tab'}
+          style={{ '--type': 'var(--yellow-500)' } as React.CSSProperties}
+          onClick={() => setTab('NOTAM')}
+          title="NOTAM"
+        >
+          NOTAM
+          {notamList.length > 0 && <span className="group-count">{notamList.length}</span>}
+        </button>
+        <button
+          role="tab"
           aria-selected={activeTab === 'INFO'}
           className={activeTab === 'INFO' ? 'group-tab on' : 'group-tab'}
           style={{ '--type': 'var(--gray-400)' } as React.CSSProperties}
@@ -267,8 +361,8 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
             informations et le plan au sol restent consultables.
           </p>
         )}
-        {activeTab === 'INFO' ? renderInfo() : renderGroup(activeTab)}
-        {activeTab !== 'INFO' && charts.status === 'ok' && charts.data.charts.length > 0 && (
+        {activeTab === 'INFO' ? renderInfo() : activeTab === 'NOTAM' ? renderNotams() : renderGroup(activeTab)}
+        {activeTab !== 'INFO' && activeTab !== 'NOTAM' && charts.status === 'ok' && charts.data.charts.length > 0 && (
           <footer className="airport-footer">
             <span>
               {charts.data.provider} · AIRAC {charts.data.airac}

@@ -1035,6 +1035,74 @@ h3 {
   padding: 8px 8px 0;
 }
 
+/* NOTAM */
+.notam-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.notam {
+  padding: 9px 11px;
+  border-radius: var(--radius);
+  background: var(--bg-400);
+  border-left: 3px solid var(--yellow-500);
+}
+
+.notam header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font: 700 13px/1.2 var(--mono);
+}
+
+.notam-category {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+  font: 500 11.5px/1.2 var(--font);
+}
+
+.notam-toggle {
+  margin-top: 4px;
+}
+
+.notam-state {
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bluegray-600);
+  color: var(--text-2);
+  font: 600 10.5px/1.3 var(--font);
+}
+
+.notam-state.active {
+  background: var(--yellow-500);
+  color: #1f1f1f;
+}
+
+.notam-validity {
+  margin: 4px 0 0;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.notam-source {
+  margin: 8px 16px 0;
+}
+
+.notam-text {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  font: 500 12px/1.45 var(--mono);
+  color: var(--text);
+}
+
 /* Choix de la piste et des procédures */
 .pickers {
   padding: 0 8px;
