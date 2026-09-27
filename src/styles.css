@@ -1054,6 +1054,43 @@ h3 {
   cursor: pointer;
 }
 
+/* Bouton des couches, en haut à droite de la carte ; son volet s'ouvre juste en dessous */
+.map-layers-button {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--radius);
+  background: var(--bg-400);
+  border: 1px solid var(--bg-200);
+  box-shadow: var(--shadow);
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.map-layers-button:hover {
+  background: var(--bluegray-600);
+  color: var(--text);
+}
+
+.map-layers-button.on {
+  background: var(--blue-600);
+  border-color: var(--blue-500);
+  color: var(--text);
+}
+
+.floating-panel.layer-panel {
+  top: 56px;
+  left: auto;
+  right: 12px;
+}
+
 /* Interrupteur */
 .switch-row input {
   appearance: none;

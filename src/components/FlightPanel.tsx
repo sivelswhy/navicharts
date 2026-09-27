@@ -124,7 +124,7 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
           className="route-input"
           value={text}
           onChange={(e) => onText(e.target.value)}
-          placeholder={EXAMPLE_ROUTE}
+          placeholder="Ex. : LFPG DCT LMG DCT LFBZ"
           rows={4}
           spellCheck={false}
           onKeyDown={(e) => {

@@ -280,15 +280,6 @@ export function App() {
           <IconPlane />
           <span>Vol</span>
         </button>
-        <button
-          className={layersOpen ? 'rail-button on' : 'rail-button'}
-          onClick={() => setLayersOpen((o) => !o)}
-          title="Couches de la carte"
-          aria-pressed={layersOpen}
-        >
-          <IconLayers />
-          <span>Couches</span>
-        </button>
       </nav>
 
       <aside className="drawer" inert={!drawerOpen}>
@@ -358,6 +349,15 @@ export function App() {
             layers={layers}
             route={routeFeatures}
           />
+          <button
+            className={layersOpen ? 'map-layers-button on' : 'map-layers-button'}
+            onClick={() => setLayersOpen((o) => !o)}
+            title="Couches de la carte"
+            aria-pressed={layersOpen}
+          >
+            <IconLayers size={18} />
+            <span>Couches</span>
+          </button>
           {layersOpen && <LayerControl layers={layers} onToggle={toggleLayer} onClose={() => setLayersOpen(false)} />}
           {overlayChart && !calib && (
             <OverlayPanel
