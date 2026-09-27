@@ -9,6 +9,10 @@ export const AERO_COLORS = {
   vfr: '#9c3f79',
   airway: '#7ea4c6',
   airwayLabel: '#35658f',
+  airwayLower: '#2f6f9f',
+  airwayUpper: '#7a4f9c',
+  sid: '#1f7a4d',
+  star: '#b4442c',
 };
 
 const SIZE = 32; // dessinés en 2x (affichés en 16 px)
@@ -102,10 +106,14 @@ const HOLDING_ICONS: Record<string, string> = {
   ),
 };
 
-// Cartouches extensibles derrière les libellés (icon-text-fit) : panneau de taxiway et désignation de piste
+// Cartouches extensibles derrière les libellés (icon-text-fit) : panneau de taxiway, désignation de piste, nom de route
 const LABEL_BOXES: Record<string, { fill: string; stroke: string }> = {
   'box-taxiway': { fill: '#f7c948', stroke: '#1f1f1f' },
   'box-runway': { fill: '#2b3440', stroke: '#2b3440' },
+  'box-airway-lower': { fill: '#ffffff', stroke: '#2f6f9f' },
+  'box-airway-upper': { fill: '#ffffff', stroke: '#7a4f9c' },
+  'box-sid': { fill: '#ffffff', stroke: '#1f7a4d' },
+  'box-star': { fill: '#ffffff', stroke: '#b4442c' },
 };
 
 /** Type de balise (eAIP ou OurAirports) → nom d'icône */

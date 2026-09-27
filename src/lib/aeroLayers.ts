@@ -1,15 +1,36 @@
 // Couches aéronautiques affichées par-dessus le fond de carte : espaces aériens, routes, points de report,
 // balises, pistes et aérodromes.
-import type { ExpressionSpecification, FilterSpecification, Map as MapLibreMap } from 'maplibre-gl';
+import type { ExpressionSpecification, FilterSpecification, Map as MapLibreMap, SymbolLayerSpecification } from 'maplibre-gl';
 import { AERO_COLORS, NAVAID_ICON } from './aeroIcons.ts';
 import { FONT_BOLD, FONT_REGULAR } from './mapStyle.ts';
 
-export type LayerGroup = 'airspaces' | 'airways' | 'waypoints' | 'navaids' | 'airports' | 'ground' | 'ivao';
+export type LayerGroup =
+  | 'airspaces'
+  | 'airways'
+  | 'autorouter'
+  | 'autorouterSid'
+  | 'autorouterStar'
+  | 'autorouterPoints'
+  | 'waypoints'
+  | 'navaids'
+  | 'airports'
+  | 'ground'
+  | 'ivao';
 
-export const LAYER_GROUP_LABELS: Record<LayerGroup, string> = {
+/** Routes autorouter : test local uniquement, servies par le serveur de dev Vite (voir vite.config.ts) */
+const AUTOROUTER = import.meta.env.DEV;
+
+export const LAYER_GROUP_LABELS: Partial<Record<LayerGroup, string>> = {
   airspaces: 'Espaces aériens (France)',
-  airways: 'Routes RNAV (France)',
-  waypoints: 'Points de report (France)',
+  // Remplacées pour l'instant par les routes autorouter pendant les tests
+  ...(!AUTOROUTER && { airways: 'Routes RNAV (France)' }),
+  ...(AUTOROUTER && {
+    autorouter: 'Routes autorouter (test local)',
+    autorouterSid: 'SID autorouter (test local)',
+    autorouterStar: 'STAR autorouter (test local)',
+  }),
+  ...(!AUTOROUTER && { waypoints: 'Points de report (France)' }),
+  ...(AUTOROUTER && { autorouterPoints: 'Points de report autorouter (test local)' }),
   navaids: 'Balises',
   airports: 'Aérodromes',
   ground: 'Plan au sol',
@@ -19,7 +40,11 @@ export const LAYER_GROUP_LABELS: Record<LayerGroup, string> = {
 export const LAYER_GROUPS: Record<LayerGroup, string[]> = {
   airspaces: ['airspace-fill', 'airspace-fir', 'airspace-line', 'airspace-line-e', 'airspace-label'],
   airways: ['airways', 'airway-labels'],
+  autorouter: ['autorouter-airways-casing', 'autorouter-airways', 'autorouter-airway-labels'],
+  autorouterSid: ['autorouter-sid', 'autorouter-sid-labels'],
+  autorouterStar: ['autorouter-star', 'autorouter-star-labels'],
   waypoints: ['waypoints'],
+  autorouterPoints: ['autorouter-waypoints'],
   navaids: ['navaids'],
   airports: ['runways', 'runway-ends', 'airports'],
   ground: ['ground-apron', 'ground-taxiway', 'ground-taxiway-centerline', 'ground-runway', 'ground-taxiway-labels', 'ground-holding', 'ground-stands'],
@@ -121,31 +146,180 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
     },
   });
 
-  // Routes RNAV
-  add({
-    id: 'airways',
-    type: 'line',
-    source: 'airways',
-    minzoom: 5.5,
-    paint: { 'line-color': AERO_COLORS.airway, 'line-width': ['interpolate', ['linear'], ['zoom'], 5.5, 0.6, 10, 1.5] },
-  });
-  add({
-    id: 'airway-labels',
-    type: 'symbol',
-    source: 'airways',
-    minzoom: 7.5,
-    layout: {
-      'symbol-placement': 'line-center',
-      'text-field': ['get', 'name'],
-      'text-font': FONT_BOLD,
-      'text-size': 9.5,
-      'text-keep-upright': true,
-    },
-    paint: { 'text-color': AERO_COLORS.airwayLabel, 'text-halo-color': HALO, 'text-halo-width': 2.2 },
-  });
+  // Routes RNAV (masquées pendant les tests des routes autorouter ; route.ts charge ses propres données)
+  if (!AUTOROUTER) {
+    add({
+      id: 'airways',
+      type: 'line',
+      source: 'airways',
+      minzoom: 5.5,
+      paint: { 'line-color': AERO_COLORS.airway, 'line-width': ['interpolate', ['linear'], ['zoom'], 5.5, 0.6, 10, 1.5] },
+    });
+    add({
+      id: 'airway-labels',
+      type: 'symbol',
+      source: 'airways',
+      minzoom: 7.5,
+      layout: {
+        'symbol-placement': 'line-center',
+        'text-field': ['get', 'name'],
+        'text-font': FONT_BOLD,
+        'text-size': 9.5,
+        'text-keep-upright': true,
+      },
+      paint: { 'text-color': AERO_COLORS.airwayLabel, 'text-halo-color': HALO, 'text-halo-width': 2.2 },
+    });
+  }
 
-  // Points de report
-  add({
+  // Autorouter (test local) : une source par contenu (routes, SID, STAR), toutes dans la couche MVT `airway`
+  if (AUTOROUTER) {
+    for (const kind of ['airway', 'sid', 'star']) {
+      map.addSource(`autorouter-${kind}`, {
+        type: 'vector',
+        tiles: [`${location.origin}/dev/autorouter/${kind}/{z}/{x}/{y}.mvt`],
+        // autorouter fournit les routes dès le zoom 5 (tuiles vides en dessous)
+        minzoom: kind === 'airway' ? 5 : 6,
+        maxzoom: 10,
+        attribution: 'Routes et procédures © autorouter (test local)',
+      });
+    }
+    const src = (kind: string) => ({ source: `autorouter-${kind}`, 'source-layer': 'airway' }) as const;
+    const next = (i: number) => ['case', ['has', `a${i}ident`], ['concat', ' · ', ['get', `a${i}ident`]], ''];
+    // Au plus `max` désignations par tronçon, puis le nombre restant
+    const names = (max: number) => [
+      'concat',
+      ['coalesce', ['get', 'a0ident'], ''],
+      ...Array.from({ length: max - 1 }, (_, i) => next(i + 1)),
+      ['case', ['>', ['coalesce', ['get', 'airways'], 0], max], ['concat', ' +', ['to-string', ['-', ['get', 'airways'], max]]], ''],
+    ];
+    // Cartouches horizontaux, lisibles quelle que soit l'orientation du tronçon
+    const boxedLabel: SymbolLayerSpecification['layout'] = {
+      'text-rotation-alignment': 'viewport',
+      'icon-rotation-alignment': 'viewport',
+      'icon-text-fit': 'both',
+      'icon-text-fit-padding': [1, 4, 1, 4],
+      'text-font': FONT_BOLD,
+    };
+
+    // SID en vert, STAR en rouge brique et en tirets, sous les routes
+    const procedure = (kind: 'sid' | 'star', color: string, dash?: number[]) => {
+      add({
+        id: `autorouter-${kind}`,
+        type: 'line',
+        ...src(kind),
+        minzoom: 7.5,
+        layout: { 'line-join': 'round', 'line-cap': dash ? 'butt' : 'round' },
+        paint: {
+          'line-color': color,
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 7.5, 0.4, 9, 0.8],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 7.5, 0.6, 11, 1.8],
+          ...(dash && { 'line-dasharray': dash }),
+        },
+      });
+      add({
+        id: `autorouter-${kind}-labels`,
+        type: 'symbol',
+        ...src(kind),
+        minzoom: 9.5,
+        filter: filter(['has', 'a0ident']),
+        layout: {
+          ...boxedLabel,
+          'symbol-placement': 'line',
+          'symbol-spacing': 400,
+          'text-field': expr(names(2)),
+          'text-size': 9,
+          'text-padding': 8,
+          'icon-image': `box-${kind}`,
+        },
+        paint: { 'text-color': color },
+      });
+    };
+    procedure('sid', AERO_COLORS.sid);
+    procedure('star', AERO_COLORS.star, [3, 1.5]);
+
+    // Routes : inférieures en bleu, supérieures en violet, comme sur les cartes en route.
+    // Supérieure : plancher au FL 195 ou plus (altlower vaut « F245 », « GND »…), ou désignation en U
+    const upper = ['any', ['==', ['slice', ['coalesce', ['get', 'a0ident'], ''], 0, 1], 'U'], ['>=', ['to-number', ['slice', ['coalesce', ['get', 'altlower'], ''], 1], 0], 195]];
+    const color = expr(['case', upper, AERO_COLORS.airwayUpper, AERO_COLORS.airwayLower]);
+    add({
+      id: 'autorouter-airways-casing',
+      type: 'line',
+      ...src('airway'),
+      minzoom: 7,
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': HALO, 'line-opacity': 0.85, 'line-width': ['interpolate', ['linear'], ['zoom'], 7, 2, 11, 5] },
+    });
+    add({
+      id: 'autorouter-airways',
+      type: 'line',
+      ...src('airway'),
+      minzoom: 5,
+      layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': expr(['case', upper, 0, 1]) },
+      paint: {
+        'line-color': color,
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.7, 8, 0.9],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.7, 7, 1, 11, 2.2],
+      },
+    });
+    add({
+      id: 'autorouter-airway-labels',
+      type: 'symbol',
+      ...src('airway'),
+      minzoom: 7.5,
+      filter: filter(['has', 'a0ident']),
+      layout: {
+        ...boxedLabel,
+        'symbol-placement': 'line',
+        'symbol-spacing': 320,
+        'symbol-sort-key': expr(['case', upper, 1, 0]),
+        'text-field': expr([
+          'step',
+          ['zoom'],
+          ['format', names(3), {}],
+          9.5,
+          ['format', names(3), {}, '\n', {}, ['concat', ['coalesce', ['get', 'altlower'], '?'], ' – ', ['coalesce', ['get', 'altupper'], '?']], { 'font-scale': 0.85, 'text-font': ['literal', FONT_REGULAR] }],
+        ]),
+        'text-size': ['interpolate', ['linear'], ['zoom'], 7.5, 9, 11, 10.5],
+        'text-padding': 6,
+        'icon-image': expr(['case', upper, 'box-airway-upper', 'box-airway-lower']),
+      },
+      paint: { 'text-color': color },
+    });
+  }
+
+  // Points de report (remplacés en dev par ceux d'autorouter, partout où il y en a)
+  if (AUTOROUTER) {
+    map.addSource('autorouter-designatedpoint', {
+      type: 'vector',
+      tiles: [`${location.origin}/dev/autorouter/designatedpoint/{z}/{x}/{y}.mvt`],
+      minzoom: 6,
+      maxzoom: 10,
+      attribution: 'Points © autorouter (test local)',
+    });
+    // type 0 : points en route à 5 lettres ; les autres (points de procédure, radial/distance) plus tard
+    const enRoute = ['==', ['get', 'type'], 0];
+    add({
+      id: 'autorouter-waypoints',
+      type: 'symbol',
+      source: 'autorouter-designatedpoint',
+      'source-layer': 'designatedpoint',
+      minzoom: 7,
+      filter: filter(['all', ['!=', ['get', 'ident'], ''], ['any', enRoute, ['>=', ['zoom'], 9]]]),
+      layout: {
+        'icon-image': 'waypoint',
+        'icon-size': expr(['interpolate', ['linear'], ['zoom'], 7, ['case', enRoute, 0.5, 0.35], 11, ['case', enRoute, 0.8, 0.6]]),
+        'icon-allow-overlap': true,
+        'symbol-sort-key': expr(['case', enRoute, 0, 1]),
+        'text-field': expr(['step', ['zoom'], '', 8.5, ['case', enRoute, ['get', 'ident'], ''], 10, ['get', 'ident']]),
+        'text-font': FONT_REGULAR,
+        'text-size': 9,
+        'text-offset': [0, 0.9],
+        'text-anchor': 'top',
+        'text-optional': true,
+      },
+      paint: { 'text-color': AERO_COLORS.waypoint, 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+    });
+  } else add({
     id: 'waypoints',
     type: 'symbol',
     source: 'waypoints',

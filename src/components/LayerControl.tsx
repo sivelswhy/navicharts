@@ -7,6 +7,10 @@ const KEY = 'navicharts:layers';
 const DEFAULTS: Record<LayerGroup, boolean> = {
   airspaces: true,
   airways: true,
+  autorouter: true,
+  autorouterSid: true,
+  autorouterStar: true,
+  autorouterPoints: true,
   waypoints: true,
   navaids: true,
   airports: true,

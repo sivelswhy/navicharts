@@ -6,6 +6,12 @@ import type { FlightRoute, Procedure, RouteChange, RouteProgress, Terminal } fro
 import type { Chart } from '../lib/types.ts';
 import { WeatherSection } from './Weather.tsx';
 
+// En dev, SID et STAR viennent des tuiles autorouter (test local, voir route.ts)
+const PROCEDURE_COVERAGE = import.meta.env.DEV
+  ? 'Listes d’après autorouter (test local), pistes selon l’eAIP pour les aérodromes français.'
+  : 'Listes disponibles pour les aérodromes français.';
+const PROCEDURE_SOURCE = import.meta.env.DEV ? 'autorouter (test local)' : 'les tableaux de codage de l’eAIP (France)';
+
 export const EXAMPLE_ROUTE =
   'LFPG/27L N0481F350 AGOP6A AGOPA DCT ARKIP DCT ARMAL DCT ARTAX DCT BEBIX DCT LMG DCT UVELI DCT OSMOB DCT VAVIX DCT MAGEC MAGE2S LFBZ/27';
 
@@ -377,7 +383,7 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
                   onProcedure={(star) => onChange({ star })}
                 />
               )}
-              <p className="footnote picker-note">✓ : dessert le premier (ou dernier) point de votre route. Listes disponibles pour les aérodromes français.</p>
+              <p className="footnote picker-note">✓ : dessert le premier (ou dernier) point de votre route. {PROCEDURE_COVERAGE}</p>
             </section>
           )}
           {route.notes.map((note) => (
@@ -433,7 +439,7 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
             </tbody>
           </table>
           <p className="footnote">
-            Routes vraies (Rv) et distances orthodromiques. SID et STAR d’après les tableaux de codage de l’eAIP (France) ;
+            Routes vraies (Rv) et distances orthodromiques. SID et STAR d’après {PROCEDURE_SOURCE} ;
             branches sans point (montée jusqu’à une altitude…) et fin d’approche simplifiées : suivez la carte officielle.
           </p>
         </div>

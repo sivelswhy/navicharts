@@ -3,6 +3,7 @@
 // Les points sont résolus dans les données chargées (points de report et routes de l'eAIP France, balises et
 // aérodromes d'Europe). Les SID et STAR des aérodromes français sont tracées point par point d'après les tableaux
 // de codage de l'eAIP ; ailleurs, elles sont représentées par un segment direct entre la piste et la route.
+// En dev, les SID et STAR viennent des tuiles autorouter (test local), pour tous les aérodromes couverts.
 import type { FeatureCollection } from 'geojson';
 import { loadAirports, loadDetails } from './data.ts';
 import type { LngLat } from './georef.ts';
@@ -79,10 +80,30 @@ interface AirportProcedures {
 }
 
 /** Procédures publiées dans les tableaux de codage de l'eAIP France (non disponibles ailleurs) */
-async function fetchProcedures(icao: string): Promise<AirportProcedures | null> {
+async function fetchEaipProcedures(icao: string): Promise<AirportProcedures | null> {
   if (!/^LF[A-Z]{2}$/.test(icao)) return null;
   const res = await fetch(`/api/procedures/${icao}`);
   return res.ok ? res.json() : null;
+}
+
+/**
+ * En dev, procédures reconstituées depuis les tuiles autorouter (test local, voir scripts/autorouter-procedures.ts),
+ * pour tout aérodrome couvert. Autorouter ne donne pas les pistes : elles sont reprises de l'eAIP quand la procédure
+ * y figure, sinon la procédure est proposée pour toutes les pistes. Repli sur l'eAIP si autorouter n'a rien.
+ */
+async function fetchProcedures(airport: Airport): Promise<AirportProcedures | null> {
+  const eaip = fetchEaipProcedures(airport.icao).catch(() => null);
+  if (!import.meta.env.DEV) return eaip;
+  const res = await fetch(`/dev/autorouter/procedures/${airport.icao}?lon=${airport.lon}&lat=${airport.lat}`).catch(() => null);
+  const autorouter: AirportProcedures | null = res?.ok ? await res.json() : null;
+  if (!autorouter?.procedures.length) return eaip;
+  const fromEaip = await eaip;
+  if (fromEaip) {
+    for (const p of autorouter.procedures) {
+      p.runways = [...new Set(fromEaip.procedures.filter((q) => q.type === p.type && q.ident === p.ident).flatMap((q) => q.runways))];
+    }
+  }
+  return autorouter;
 }
 
 /**
@@ -106,7 +127,7 @@ function findProcedure(
   transition: string | null,
 ): Match | null {
   const candidates = data.procedures.filter((p) => p.type === type);
-  const onRunway = (p: Procedure) => !runway || p.runways.includes(runway);
+  const onRunway = (p: Procedure) => !runway || !p.runways.length || p.runways.includes(runway);
   const revision = new RegExp(`^${ident.replace(/\d(?=[A-Z]?$)/, '\\d')}$`);
   const exact = candidates.find((p) => p.ident === ident && onRunway(p));
   if (exact) return { procedure: exact, reason: 'exact' };
@@ -123,7 +144,7 @@ function procedureOptions(data: AirportProcedures | null, type: 'SID' | 'STAR', 
   if (!data) return [];
   const seen = new Set<string>();
   return data.procedures
-    .filter((p) => p.type === type && (!runway || p.runways.includes(runway)))
+    .filter((p) => p.type === type && (!runway || !p.runways.length || p.runways.includes(runway)))
     .filter((p) => !seen.has(p.ident) && seen.add(p.ident))
     .sort((a, b) => Number(transitionOf(b) === transition) - Number(transitionOf(a) === transition) || a.ident.localeCompare(b.ident));
 }
@@ -160,7 +181,7 @@ interface NavData {
 }
 
 type PointFeature = { geometry: { coordinates: LngLat }; properties: { ident: string; name?: string; type?: string } };
-type LineFeature = { geometry: { coordinates: LngLat[] }; properties: { name: string } };
+type LineFeature = { geometry: { coordinates: LngLat[] }; properties: { name: string; from?: string | null; to?: string | null } };
 
 const key = ([lon, lat]: LngLat) => `${lon.toFixed(4)},${lat.toFixed(4)}`;
 
@@ -194,6 +215,9 @@ function loadNavData(): Promise<NavData> {
     const graph = new Map<string, Map<string, string[]>>();
     for (const f of airways) {
       const [a, b] = f.geometry.coordinates.map(key);
+      // Extrémités nommées dans l'eAIP (balises aux coordonnées légèrement différentes de celles de la base)
+      if (f.properties.from && !identAt.has(a)) identAt.set(a, f.properties.from);
+      if (f.properties.to && !identAt.has(b)) identAt.set(b, f.properties.to);
       const g = graph.get(f.properties.name) ?? new Map<string, string[]>();
       g.set(a, [...(g.get(a) ?? []), b]);
       g.set(b, [...(g.get(b) ?? []), a]);
@@ -202,6 +226,56 @@ function loadNavData(): Promise<NavData> {
     return { byIdent, airways: graph, identAt, airports };
   })();
   return navData;
+}
+
+interface AutorouterNav {
+  points: { ident: string; kind: 'waypoint' | 'navaid' | 'airport'; lngLat: LngLat; name?: string }[];
+  airways: { name: string; from: LngLat; to: LngLat; fromIdent: string; toIdent: string }[];
+}
+
+/**
+ * En dev, points et routes aériennes autorouter de la zone du vol (test local, voir scripts/autorouter-nav.ts),
+ * à la place de nos points de report ; les routes autorouter remplacent celles de l'eAIP du même nom, comme sur la carte.
+ */
+async function withAutorouter(base: NavData, departure: Terminal | null, arrival: Terminal | null): Promise<NavData> {
+  const ends = [departure, arrival].flatMap((t) => (t ? [[t.airport.lon, t.airport.lat]] : []));
+  if (!ends.length) return base;
+  const margin = ends.length === 1 ? 4 : 1.5;
+  const lons = ends.map((e) => e[0]);
+  const lats = ends.map((e) => e[1]);
+  const bbox = [Math.min(...lons) - margin, Math.min(...lats) - margin, Math.max(...lons) + margin, Math.max(...lats) + margin];
+  const res = await fetch(`/dev/autorouter/nav?bbox=${bbox.map((n) => n.toFixed(2)).join(',')}`).catch(() => null);
+  const data: AutorouterNav | null = res?.ok ? await res.json() : null;
+  if (!data) return base;
+
+  // Nos points de report (eAIP France) sont en veille pendant les tests : seuls ceux d'autorouter servent
+  const byIdent = new Map<string, Candidate[]>();
+  for (const [ident, candidates] of base.byIdent) {
+    const kept = candidates.filter((c) => c.kind !== 'waypoint');
+    if (kept.length) byIdent.set(ident, kept);
+  }
+  const identAt = new Map(base.identAt);
+  const known = (ident: string, lngLat: LngLat) => byIdent.get(ident)?.some((c) => distanceNm(c.lngLat, lngLat) < 1);
+  for (const p of data.points) {
+    // Aérodromes : déjà dans nos données ; balises seulement si elles n'y sont pas déjà
+    if (p.kind === 'airport' || known(p.ident, p.lngLat)) continue;
+    byIdent.set(p.ident, [...(byIdent.get(p.ident) ?? []), { kind: p.kind, lngLat: p.lngLat, name: p.name }]);
+  }
+  const airways = new Map(base.airways);
+  const replaced = new Set<string>();
+  for (const s of data.airways) {
+    if (!replaced.has(s.name)) {
+      airways.set(s.name, new Map());
+      replaced.add(s.name);
+    }
+    const [a, b] = [key(s.from), key(s.to)];
+    identAt.set(a, s.fromIdent);
+    identAt.set(b, s.toIdent);
+    const g = airways.get(s.name)!;
+    g.set(a, [...(g.get(a) ?? []), b]);
+    g.set(b, [...(g.get(b) ?? []), a]);
+  }
+  return { ...base, byIdent, identAt, airways };
 }
 
 // ───────── Géodésie ─────────
@@ -254,12 +328,12 @@ async function terminalPoint(t: Terminal): Promise<RoutePoint> {
 }
 
 export async function parseRoute(text: string): Promise<FlightRoute> {
-  const nav = await loadNavData();
+  const base = await loadNavData();
   const tokens = text.toUpperCase().replace(/[()-]/g, ' ').split(/\s+/).filter(Boolean);
 
   const terminal = (token: string | undefined): Terminal | null => {
     const m = token ? TERMINAL.exec(token) : null;
-    const airport = m && nav.airports.find((a) => a.icao === m[1]);
+    const airport = m && base.airports.find((a) => a.icao === m[1]);
     return airport ? { airport, runway: m[2] ?? null } : null;
   };
 
@@ -267,6 +341,7 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
   if (departure) tokens.shift();
   const arrival = terminal(tokens.at(-1));
   if (arrival) tokens.pop();
+  const nav = import.meta.env.DEV ? await withAutorouter(base, departure, arrival) : base;
 
   const route: FlightRoute = {
     departure,
@@ -343,7 +418,9 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
     const exit = tokens[i + 1]?.split('/')[0];
     const entry = points.at(-1)?.point;
     if (graph && entry && exit) {
-      const path = walkAirway(graph, key(entry.lngLat), exit, nav.identAt);
+      // Point d'entrée : mêmes coordonnées, sinon nœud de la route portant le même identifiant
+      const start = graph.has(key(entry.lngLat)) ? key(entry.lngLat) : [...graph.keys()].find((k) => nav.identAt.get(k) === entry.ident);
+      const path = start ? walkAirway(graph, start, exit, nav.identAt) : null;
       if (path) {
         for (const k of path) {
           const ident = nav.identAt.get(k)!;
@@ -369,8 +446,8 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
   const start = departure ? await terminalPoint(departure) : null;
   const end = arrival ? await terminalPoint(arrival) : null;
   const [depProcedures, arrProcedures, departureRunways, arrivalRunways] = await Promise.all([
-    departure ? fetchProcedures(departure.airport.icao) : null,
-    arrival ? fetchProcedures(arrival.airport.icao) : null,
+    departure ? fetchProcedures(departure.airport) : null,
+    arrival ? fetchProcedures(arrival.airport) : null,
     runwaysOf(departure),
     runwaysOf(arrival),
   ]);
