@@ -10,13 +10,11 @@ import { addAeroLayers, GROUND_SOURCE, setGroupVisibility, type LayerGroup } fro
 import type { LngLat } from '../lib/georef.ts';
 import { baseStyle, FONT_BOLD, FONT_REGULAR } from '../lib/mapStyle.ts';
 import type { Airport } from '../lib/types.ts';
-import { IconRotate, IconRotateLeft } from './icons.tsx';
 
 // MapLibre 6 charge ses workers depuis un fichier séparé, que la pré-compilation de Vite ne sait pas retrouver.
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 const SNAP_PX = 14;
-const ROTATION_STEP = 15;
 
 /** Contrôle MapLibre vide dont le contenu est rendu par React (portail) */
 class PortalControl implements maplibregl.IControl {
@@ -63,6 +61,8 @@ interface Props {
   snapPoints: SnapPoint[];
   controlPoints: LngLat[];
   layers: Record<LayerGroup, boolean>;
+  /** Trajet du plan de vol (segments et points) */
+  route: FeatureCollection | null;
 }
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -82,7 +82,9 @@ function boundsOf(coords: LngLat[]): maplibregl.LngLatBounds {
   return coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
 }
 
-export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoints, controlPoints, layers }: Props) {
+const ROUTE_COLOR = '#c2188f';
+
+export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoints, controlPoints, layers, route }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
@@ -159,6 +161,70 @@ export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoin
         source: 'control-points',
         layout: { 'text-field': ['get', 'label'], 'text-font': FONT_REGULAR, 'text-size': 11, 'text-allow-overlap': true },
         paint: { 'text-color': '#fff' },
+      });
+
+      // Trajet du plan de vol, au-dessus des couches aéronautiques et des cartes superposées
+      m.addSource('route', { type: 'geojson', data: EMPTY });
+      const isLine: maplibregl.ExpressionSpecification = ['==', ['geometry-type'], 'LineString'];
+      m.addLayer({
+        id: 'route-casing',
+        type: 'line',
+        source: 'route',
+        filter: isLine,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.9 },
+      });
+      m.addLayer({
+        id: 'route-line',
+        type: 'line',
+        source: 'route',
+        filter: ['all', isLine, ['!', ['to-boolean', ['get', 'procedure']]]],
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': ROUTE_COLOR, 'line-width': 3 },
+      });
+      // SID et STAR : segment indicatif, en tirets
+      m.addLayer({
+        id: 'route-procedure',
+        type: 'line',
+        source: 'route',
+        filter: ['all', isLine, ['to-boolean', ['get', 'procedure']]],
+        paint: { 'line-color': ROUTE_COLOR, 'line-width': 2.5, 'line-dasharray': [2, 1.5] },
+      });
+      m.addLayer({
+        id: 'route-procedure-labels',
+        type: 'symbol',
+        source: 'route',
+        filter: ['all', isLine, ['to-boolean', ['get', 'procedure']]],
+        layout: {
+          'symbol-placement': 'line-center',
+          'text-field': ['get', 'via'],
+          'text-font': FONT_BOLD,
+          'text-size': 10.5,
+          'text-offset': [0, -0.9],
+        },
+        paint: { 'text-color': ROUTE_COLOR, 'text-halo-color': '#fff', 'text-halo-width': 2 },
+      });
+      m.addLayer({
+        id: 'route-points',
+        type: 'circle',
+        source: 'route',
+        filter: ['==', ['geometry-type'], 'Point'],
+        paint: { 'circle-radius': 4.5, 'circle-color': '#fff', 'circle-stroke-color': ROUTE_COLOR, 'circle-stroke-width': 2.5 },
+      });
+      m.addLayer({
+        id: 'route-labels',
+        type: 'symbol',
+        source: 'route',
+        filter: ['==', ['geometry-type'], 'Point'],
+        layout: {
+          'text-field': ['get', 'ident'],
+          'text-font': FONT_BOLD,
+          'text-size': 11,
+          'text-anchor': 'left',
+          'text-offset': [0.8, 0],
+          'text-allow-overlap': true,
+        },
+        paint: { 'text-color': ROUTE_COLOR, 'text-halo-color': '#fff', 'text-halo-width': 2 },
       });
 
       m.on('click', (e) => {
@@ -286,6 +352,15 @@ export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoin
     }
   }, [overlay, ready]);
 
+  // Trajet du plan de vol : mise à jour et cadrage sur l'ensemble du vol
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    (m.getSource('route') as GeoJSONSource).setData(route ?? EMPTY);
+    const coords = (route?.features ?? []).filter((f) => f.geometry.type === 'Point').map((f) => (f.geometry as Point).coordinates as LngLat);
+    if (coords.length >= 2) m.fitBounds(boundsOf(coords), { padding: 60, duration: 800, bearing: m.getBearing() });
+  }, [route, ready]);
+
   // Couches affichées
   useEffect(() => {
     const m = map.current;
@@ -315,33 +390,24 @@ export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoin
     );
   }, [controlPoints, ready]);
 
-  const rotateBy = (delta: number) => map.current?.easeTo({ bearing: (map.current.getBearing() + delta) % 360, duration: 250 });
   const heading = Math.round((bearing + 360) % 360) % 360;
 
   return (
     <>
       <div ref={container} className="map" />
       {createPortal(
-        <>
-          <button onClick={() => rotateBy(-ROTATION_STEP)} title="Tourner la carte vers la gauche (Maj + ←)" aria-label="Tourner vers la gauche">
-            <IconRotateLeft size={17} />
-          </button>
-          <button
-            className="compass"
-            onClick={() => map.current?.easeTo({ bearing: 0, duration: 300 })}
-            title="Remettre le nord en haut (clic droit + glisser pour tourner librement)"
-            aria-label={`Orientation ${heading}°, remettre le nord en haut`}
-          >
-            <svg viewBox="0 0 24 24" width="22" height="22" style={{ transform: `rotate(${-bearing}deg)` }} aria-hidden>
-              <path d="M12 2.5l3.2 9.5h-6.4z" fill="#e0524a" />
-              <path d="M12 21.5l-3.2-9.5h6.4z" fill="currentColor" opacity="0.55" />
-            </svg>
-            <span className="bearing">{String(heading).padStart(3, '0')}°</span>
-          </button>
-          <button onClick={() => rotateBy(ROTATION_STEP)} title="Tourner la carte vers la droite (Maj + →)" aria-label="Tourner vers la droite">
-            <IconRotate size={17} />
-          </button>
-        </>,
+        <button
+          className="compass"
+          onClick={() => map.current?.easeTo({ bearing: 0, duration: 300 })}
+          title="Remettre le nord en haut (clic droit + glisser pour tourner librement)"
+          aria-label={`Orientation ${heading}°, remettre le nord en haut`}
+        >
+          <svg viewBox="0 0 24 24" width="22" height="22" style={{ transform: `rotate(${-bearing}deg)` }} aria-hidden>
+            <path d="M12 2.5l3.2 9.5h-6.4z" fill="#e0524a" />
+            <path d="M12 21.5l-3.2-9.5h6.4z" fill="currentColor" opacity="0.55" />
+          </svg>
+          <span className="bearing">{String(heading).padStart(3, '0')}°</span>
+        </button>,
         rotationControl.element,
       )}
     </>

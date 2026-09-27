@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AirportPanel } from './components/AirportPanel.tsx';
 import { ChartViewer } from './components/ChartViewer.tsx';
-import { IconCharts, IconChevronLeft, IconLayers } from './components/icons.tsx';
+import { FlightPanel } from './components/FlightPanel.tsx';
+import { IconCharts, IconChevronLeft, IconLayers, IconPlane } from './components/icons.tsx';
 import { LayerControl, useLayerVisibility } from './components/LayerControl.tsx';
 import { MapView, type MapOverlay, type SnapPoint } from './components/MapView.tsx';
 import { CalibrationBar, OverlayPanel } from './components/OverlayControls.tsx';
@@ -9,6 +10,7 @@ import { Pinboard } from './components/Pinboard.tsx';
 import { SearchBox } from './components/SearchBox.tsx';
 import { fetchAutoGeoref, loadAirports, loadDetails, type AutoGeoref } from './lib/data.ts';
 import { usePins } from './lib/pins.ts';
+import { parseRoute, routeGeoJson, type FlightRoute } from './lib/route.ts';
 import { fitTransform, pageCorners, useGeorefs, type ControlPoint, type LngLat, type PdfPoint } from './lib/georef.ts';
 import { renderOverlay, type OverlayImage, type OverlayStyle } from './lib/pdf.ts';
 import type { Airport, Chart } from './lib/types.ts';
@@ -32,6 +34,7 @@ type OverlayImageState = { url: string; style: OverlayStyle } & (
   | { status: 'ready'; data: OverlayImage }
 );
 
+const ROUTE_KEY = 'navicharts:route';
 const NO_SNAP: SnapPoint[] = [];
 const NO_POINTS: LngLat[] = [];
 const NO_CONTROL_POINTS: ControlPoint[] = [];
@@ -44,7 +47,44 @@ export function App() {
   const pins = usePins();
   const { layers, toggle: toggleLayer } = useLayerVisibility();
   const [drawerOpen, setDrawerOpen] = useState(true);
+  const [drawerView, setDrawerView] = useState<'charts' | 'flight'>('charts');
   const [layersOpen, setLayersOpen] = useState(false);
+
+  // Plan de vol : dernière route saisie, mémorisée dans le navigateur
+  const [routeText, setRouteText] = useState(() => {
+    try {
+      return localStorage.getItem(ROUTE_KEY) ?? '';
+    } catch {
+      return '';
+    }
+  });
+  const [flightRoute, setFlightRoute] = useState<FlightRoute | null>(null);
+  const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const routeFeatures = useMemo(() => (flightRoute ? routeGeoJson(flightRoute) : null), [flightRoute]);
+
+  const showRoute = useCallback(async () => {
+    try {
+      localStorage.setItem(ROUTE_KEY, routeText);
+    } catch {
+      // route non mémorisée
+    }
+    setRouteStatus('loading');
+    try {
+      setFlightRoute(await parseRoute(routeText));
+      setRouteStatus('idle');
+    } catch {
+      setRouteStatus('error');
+    }
+  }, [routeText]);
+
+  /** Bouton du rail : ouvre la vue demandée, ou replie le panneau si elle est déjà affichée */
+  const toggleDrawer = (view: 'charts' | 'flight') => {
+    if (drawerOpen && drawerView === view) setDrawerOpen(false);
+    else {
+      setDrawerView(view);
+      setDrawerOpen(true);
+    }
+  };
 
   const { georefs, save: saveGeoref } = useGeorefs();
   const [calib, setCalib] = useState<Calibration | null>(null);
@@ -223,13 +263,22 @@ export function App() {
           ✦
         </div>
         <button
-          className={drawerOpen ? 'rail-button on' : 'rail-button'}
-          onClick={() => setDrawerOpen((o) => !o)}
+          className={drawerOpen && drawerView === 'charts' ? 'rail-button on' : 'rail-button'}
+          onClick={() => toggleDrawer('charts')}
           title="Aérodromes et cartes"
-          aria-pressed={drawerOpen}
+          aria-pressed={drawerOpen && drawerView === 'charts'}
         >
           <IconCharts />
           <span>Cartes</span>
+        </button>
+        <button
+          className={drawerOpen && drawerView === 'flight' ? 'rail-button on' : 'rail-button'}
+          onClick={() => toggleDrawer('flight')}
+          title="Plan de vol"
+          aria-pressed={drawerOpen && drawerView === 'flight'}
+        >
+          <IconPlane />
+          <span>Vol</span>
         </button>
         <button
           className={layersOpen ? 'rail-button on' : 'rail-button'}
@@ -255,7 +304,22 @@ export function App() {
               Données introuvables. Lancez <code>npm run data</code> puis rechargez la page.
             </p>
           )}
-          {selected ? (
+          {drawerView === 'flight' ? (
+            <FlightPanel
+              text={routeText}
+              onText={setRouteText}
+              route={flightRoute}
+              status={routeStatus}
+              onShow={showRoute}
+              onClear={() => setFlightRoute(null)}
+              onSelectAirport={(ident) => {
+                select(ident);
+                setDrawerView('charts');
+              }}
+              onOpenChart={openChart}
+              openChart={chart}
+            />
+          ) : selected ? (
             <AirportPanel
               airport={selected}
               openChart={chart}
@@ -292,6 +356,7 @@ export function App() {
             snapPoints={calib ? snapPoints : NO_SNAP}
             controlPoints={controlPoints}
             layers={layers}
+            route={routeFeatures}
           />
           {layersOpen && <LayerControl layers={layers} onToggle={toggleLayer} onClose={() => setLayersOpen(false)} />}
           {overlayChart && !calib && (

@@ -36,6 +36,12 @@ export const IconMap = (p: IconProps) => (
   </Icon>
 );
 
+export const IconPlane = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M10.5 21l1.5-1.5V14l8 3v-2l-8-5V4.5a1.5 1.5 0 0 0-3 0V10l-8 5v2l8-3v5.5L10.5 21z" transform="translate(1.5 0)" />
+  </Icon>
+);
+
 export const IconLayers = (p: IconProps) => (
   <Icon {...p}>
     <path d="M12 3l9 5-9 5-9-5z" />
@@ -79,13 +85,6 @@ export const IconRotate = (p: IconProps) => (
   <Icon {...p}>
     <path d="M20 12a8 8 0 1 1-2.3-5.7" />
     <path d="M20 4v5h-5" />
-  </Icon>
-);
-
-export const IconRotateLeft = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M4 12a8 8 0 1 0 2.3-5.7" />
-    <path d="M4 4v5h5" />
   </Icon>
 );
 
