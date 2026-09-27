@@ -1,0 +1,354 @@
+// Couches aéronautiques affichées par-dessus le fond de carte : espaces aériens, routes, points de report,
+// balises, pistes et aérodromes.
+import type { ExpressionSpecification, FilterSpecification, Map as MapLibreMap } from 'maplibre-gl';
+import { AERO_COLORS, NAVAID_ICON } from './aeroIcons.ts';
+import { FONT_BOLD, FONT_REGULAR } from './mapStyle.ts';
+
+export type LayerGroup = 'airspaces' | 'airways' | 'waypoints' | 'navaids' | 'airports' | 'ground';
+
+export const LAYER_GROUP_LABELS: Record<LayerGroup, string> = {
+  airspaces: 'Espaces aériens (France)',
+  airways: 'Routes RNAV (France)',
+  waypoints: 'Points de report (France)',
+  navaids: 'Balises',
+  airports: 'Aérodromes',
+  ground: 'Plan au sol',
+};
+
+export const LAYER_GROUPS: Record<LayerGroup, string[]> = {
+  airspaces: ['airspace-fill', 'airspace-fir', 'airspace-line', 'airspace-line-e', 'airspace-label'],
+  airways: ['airways', 'airway-labels'],
+  waypoints: ['waypoints'],
+  navaids: ['navaids'],
+  airports: ['runways', 'runway-ends', 'airports'],
+  ground: ['ground-apron', 'ground-taxiway', 'ground-taxiway-centerline', 'ground-runway', 'ground-taxiway-labels', 'ground-holding', 'ground-stands'],
+};
+
+/** Source alimentée à la demande avec le plan au sol des aérodromes visibles (voir MapView) */
+export const GROUND_SOURCE = 'ground';
+
+const HALO = '#ffffff';
+const expr = (e: unknown) => e as ExpressionSpecification;
+const filter = (e: unknown) => e as FilterSpecification;
+
+// Classes C/D (et A) en trait plein bleu, classe E et LTA en tirets magenta, comme sur les cartes IFR.
+// L'UTA (au-dessus du FL 195) couvre tout le territoire et suit les limites des FIR : elle n'est pas dessinée.
+const CONTROLLED = filter(['all', ['in', ['get', 'type'], ['literal', ['CTA', 'TMA', 'CTR']]], ['!=', ['get', 'class'], 'E']]);
+const CLASS_E = filter(['any', ['==', ['get', 'class'], 'E'], ['==', ['get', 'type'], 'LTA']]);
+
+// Importance d'un aérodrome → zoom à partir duquel il est affiché
+const AIRPORT_VISIBLE = filter([
+  'any',
+  ['get', 'ifr'],
+  ['all', ['in', ['get', 'type'], ['literal', ['large_airport', 'medium_airport']]], ['>=', ['zoom'], 6.5]],
+  ['all', ['in', ['get', 'type'], ['literal', ['small_airport', 'seaplane_base']]], ['>=', ['zoom'], 8]],
+  ['>=', ['zoom'], 10],
+]);
+
+export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
+  const data = (name: string) => `/data/${name}.geojson`;
+  map.addSource('airspaces', { type: 'geojson', data: data('airspaces') });
+  map.addSource('airways', { type: 'geojson', data: data('airways') });
+  map.addSource('waypoints', { type: 'geojson', data: data('waypoints') });
+  map.addSource('navaids', { type: 'geojson', data: data('navaids') });
+  map.addSource('runways', { type: 'geojson', data: data('runways') });
+  map.addSource('airports', { type: 'geojson', data: data('airports') });
+  map.addSource('runway-ends', { type: 'geojson', data: data('runway-ends') });
+  map.addSource(GROUND_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+
+  const add = (layer: Parameters<MapLibreMap['addLayer']>[0]) => map.addLayer(layer, beforeId);
+
+  // Espaces aériens
+  add({
+    id: 'airspace-fill',
+    type: 'fill',
+    source: 'airspaces',
+    // Les espaces se superposent : le remplissage n'apparaît qu'à l'échelle régionale pour ne pas voiler la carte
+    minzoom: 7,
+    filter: CONTROLLED,
+    // et s'efface à fort zoom, où l'on est souvent à l'intérieur de plusieurs parties d'une même TMA
+    paint: { 'fill-color': '#3b78c4', 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0, 8, 0.03, 10, 0.03, 11, 0] },
+  });
+  add({
+    id: 'airspace-fir',
+    type: 'line',
+    source: 'airspaces',
+    filter: filter(['==', ['get', 'type'], 'FIR']),
+    paint: { 'line-color': '#8f8a82', 'line-width': 1.6, 'line-dasharray': [6, 2, 1, 2] },
+  });
+  add({
+    id: 'airspace-line',
+    type: 'line',
+    source: 'airspaces',
+    minzoom: 5,
+    filter: CONTROLLED,
+    paint: { 'line-color': '#3b78c4', 'line-opacity': 0.75, 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.6, 10, 1.4] },
+  });
+  add({
+    id: 'airspace-line-e',
+    type: 'line',
+    source: 'airspaces',
+    minzoom: 6,
+    filter: CLASS_E,
+    paint: { 'line-color': '#b46aa6', 'line-opacity': 0.7, 'line-width': 1, 'line-dasharray': [3, 2] },
+  });
+  add({
+    id: 'airspace-label',
+    type: 'symbol',
+    source: 'airspaces',
+    minzoom: 8.5,
+    filter: filter(['in', ['get', 'type'], ['literal', ['CTA', 'TMA', 'CTR', 'LTA']]]),
+    layout: {
+      'symbol-placement': 'line',
+      'symbol-spacing': 400,
+      'text-field': expr(['concat', ['get', 'name'], '  ', ['coalesce', ['get', 'class'], ''], '  ', ['get', 'lower'], '–', ['get', 'upper']]),
+      'text-font': FONT_REGULAR,
+      'text-size': 9.5,
+      'text-offset': [0, 0.8],
+    },
+    paint: {
+      'text-color': expr(['case', ['==', ['get', 'class'], 'E'], '#9a4f8c', '#2f64a6']),
+      'text-halo-color': HALO,
+      'text-halo-width': 1.5,
+    },
+  });
+
+  // Routes RNAV
+  add({
+    id: 'airways',
+    type: 'line',
+    source: 'airways',
+    minzoom: 5.5,
+    paint: { 'line-color': AERO_COLORS.airway, 'line-width': ['interpolate', ['linear'], ['zoom'], 5.5, 0.6, 10, 1.5] },
+  });
+  add({
+    id: 'airway-labels',
+    type: 'symbol',
+    source: 'airways',
+    minzoom: 7.5,
+    layout: {
+      'symbol-placement': 'line-center',
+      'text-field': ['get', 'name'],
+      'text-font': FONT_BOLD,
+      'text-size': 9.5,
+      'text-keep-upright': true,
+    },
+    paint: { 'text-color': AERO_COLORS.airwayLabel, 'text-halo-color': HALO, 'text-halo-width': 2.2 },
+  });
+
+  // Points de report
+  add({
+    id: 'waypoints',
+    type: 'symbol',
+    source: 'waypoints',
+    minzoom: 7,
+    layout: {
+      'icon-image': 'waypoint',
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 0.5, 11, 0.8],
+      'icon-allow-overlap': true,
+      'text-field': expr(['step', ['zoom'], '', 8.5, ['get', 'ident']]),
+      'text-font': FONT_REGULAR,
+      'text-size': 9,
+      'text-offset': [0, 0.9],
+      'text-anchor': 'top',
+      'text-optional': true,
+    },
+    paint: { 'text-color': AERO_COLORS.waypoint, 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+  });
+
+  // Plan au sol (OpenStreetMap), sous les pistes et les symboles
+  const kind = (k: string) => filter(['==', ['get', 'kind'], k]);
+  add({
+    id: 'ground-apron',
+    type: 'fill',
+    source: GROUND_SOURCE,
+    minzoom: 12,
+    filter: kind('apron'),
+    paint: { 'fill-color': '#dedad2', 'fill-outline-color': '#c9c3b8' },
+  });
+  add({
+    id: 'ground-taxiway',
+    type: 'line',
+    source: GROUND_SOURCE,
+    minzoom: 12,
+    filter: kind('taxiway'),
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: {
+      'line-color': '#a8a195',
+      'line-width': ['interpolate', ['exponential', 2], ['zoom'], 12, 1, 14, 3, 16, 12, 18, 48],
+    },
+  });
+  add({
+    id: 'ground-taxiway-centerline',
+    type: 'line',
+    source: GROUND_SOURCE,
+    minzoom: 15,
+    filter: kind('taxiway'),
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': '#e8b923', 'line-width': ['interpolate', ['linear'], ['zoom'], 15, 0.6, 18, 2] },
+  });
+  add({
+    id: 'ground-runway',
+    type: 'line',
+    source: GROUND_SOURCE,
+    minzoom: 12,
+    filter: kind('runway'),
+    paint: { 'line-color': '#56606b', 'line-width': ['interpolate', ['exponential', 2], ['zoom'], 12, 3, 16, 36, 18, 144] },
+  });
+
+  // Pistes (sous les symboles d'aérodromes)
+  add({
+    id: 'runways',
+    type: 'line',
+    source: 'runways',
+    minzoom: 10,
+    layout: { 'line-cap': 'butt' },
+    paint: {
+      'line-color': expr(['case', ['get', 'hard'], '#56606b', '#98a07a']),
+      'line-width': ['interpolate', ['exponential', 2], ['zoom'], 10, 1.5, 13, 5, 16, 36],
+    },
+  });
+
+  // Détails au sol, au-dessus des pistes
+  add({
+    id: 'ground-holding',
+    type: 'symbol',
+    source: GROUND_SOURCE,
+    minzoom: 14,
+    filter: kind('holding'),
+    layout: {
+      'icon-image': expr(['case', ['==', ['get', 'holdingType'], 'ILS'], 'holding-ils', 'holding']),
+      // Le symbole est dessiné à l'horizontale (orienté est-ouest) ; `bearing` est la direction du marquage
+      'icon-rotate': expr(['-', ['coalesce', ['get', 'bearing'], 90], 90]),
+      'icon-rotation-alignment': 'map',
+      'icon-size': ['interpolate', ['exponential', 2], ['zoom'], 14, 0.6, 16, 1.6, 18, 5],
+      'icon-allow-overlap': true,
+      'text-field': expr(['step', ['zoom'], '', 15, ['coalesce', ['get', 'ref'], '']]),
+      'text-font': FONT_BOLD,
+      'text-size': 10,
+      'text-offset': [0, 1.1],
+      'text-anchor': 'top',
+      'text-optional': true,
+    },
+    paint: { 'text-color': '#d0342c', 'text-halo-color': HALO, 'text-halo-width': 1.6 },
+  });
+  add({
+    id: 'ground-taxiway-labels',
+    type: 'symbol',
+    source: GROUND_SOURCE,
+    minzoom: 13.5,
+    // `ref` vaut null pour les tronçons sans nom : sans ce test, le cartouche s'afficherait vide
+    filter: filter(['all', ['==', ['get', 'kind'], 'taxiway'], ['to-boolean', ['get', 'ref']]]),
+    layout: {
+      'symbol-placement': 'line',
+      'symbol-spacing': 250,
+      'text-field': ['get', 'ref'],
+      'text-font': FONT_BOLD,
+      'text-size': ['interpolate', ['linear'], ['zoom'], 13.5, 9, 17, 12],
+      'text-rotation-alignment': 'viewport',
+      'text-keep-upright': true,
+      'icon-image': 'box-taxiway',
+      'icon-text-fit': 'both',
+      'icon-text-fit-padding': [1, 3, 1, 3],
+      'icon-rotation-alignment': 'viewport',
+    },
+    paint: { 'text-color': '#1f1f1f' },
+  });
+  add({
+    id: 'ground-stands',
+    type: 'symbol',
+    source: GROUND_SOURCE,
+    minzoom: 15.5,
+    filter: kind('stand'),
+    layout: { 'text-field': ['get', 'ref'], 'text-font': FONT_REGULAR, 'text-size': 9.5 },
+    paint: { 'text-color': '#6b665e', 'text-halo-color': HALO, 'text-halo-width': 1.2 },
+  });
+  add({
+    id: 'runway-ends',
+    type: 'symbol',
+    source: 'runway-ends',
+    minzoom: 12,
+    layout: {
+      'text-field': ['get', 'ident'],
+      'text-font': FONT_BOLD,
+      'text-size': ['interpolate', ['linear'], ['zoom'], 12, 10, 16, 13],
+      'icon-image': 'box-runway',
+      'icon-text-fit': 'both',
+      'icon-text-fit-padding': [1, 3, 1, 3],
+      'text-allow-overlap': true,
+      'icon-allow-overlap': true,
+    },
+    paint: { 'text-color': '#ffffff' },
+  });
+
+  // Aérodromes
+  add({
+    id: 'airports',
+    type: 'symbol',
+    source: 'airports',
+    filter: AIRPORT_VISIBLE,
+    layout: {
+      'icon-image': expr(['case', ['==', ['get', 'type'], 'heliport'], 'heliport', ['get', 'ifr'], 'airport-ifr', 'airport-vfr']),
+      'icon-size': expr(['interpolate', ['linear'], ['zoom'], 5, ['case', ['get', 'ifr'], 0.7, 0.55], 10, ['case', ['get', 'ifr'], 1, 0.8]]),
+      // Les symboles restent tous visibles (le filtre de zoom limite la densité) ; seuls les libellés s'effacent
+      'icon-allow-overlap': true,
+      'symbol-sort-key': expr(['case', ['get', 'ifr'], 0, 1]),
+      'text-field': expr([
+        'step',
+        ['zoom'],
+        ['coalesce', ['get', 'icao'], ''],
+        10,
+        ['format', ['coalesce', ['get', 'icao'], ['get', 'ident']], {}, '\n', {}, ['get', 'name'], { 'font-scale': 0.8, 'text-font': ['literal', FONT_REGULAR] }],
+      ]),
+      'text-font': FONT_BOLD,
+      'text-size': 10.5,
+      'text-offset': [0, 1.1],
+      'text-anchor': 'top',
+      'text-optional': true,
+    },
+    paint: {
+      'icon-opacity': ['interpolate', ['linear'], ['zoom'], 12, 1, 13.5, 0.35],
+      'text-color': expr(['case', ['get', 'ifr'], AERO_COLORS.ifr, AERO_COLORS.vfr]),
+      'text-halo-color': HALO,
+      'text-halo-width': 1.6,
+    },
+  });
+
+  // Balises (au-dessus du reste)
+  add({
+    id: 'navaids',
+    type: 'symbol',
+    source: 'navaids',
+    minzoom: 5.5,
+    layout: {
+      'icon-image': expr(NAVAID_ICON),
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 5.5, 0.7, 10, 1],
+      'icon-allow-overlap': true,
+      'text-field': expr([
+        'step',
+        ['zoom'],
+        ['get', 'ident'],
+        8,
+        ['format', ['get', 'ident'], {}, '\n', {}, ['coalesce', ['get', 'frequency'], ''], { 'font-scale': 0.85, 'text-font': ['literal', FONT_REGULAR] }],
+      ]),
+      'text-font': FONT_BOLD,
+      'text-size': 10,
+      'text-offset': [0, 1.2],
+      'text-anchor': 'top',
+      'text-optional': true,
+    },
+    paint: {
+      'text-color': expr(['case', ['in', ['get', 'type'], ['literal', ['NDB', 'NDB-DME']]], AERO_COLORS.ndb, AERO_COLORS.vor]),
+      'text-halo-color': HALO,
+      'text-halo-width': 1.8,
+    },
+  });
+}
+
+export function setGroupVisibility(map: MapLibreMap, visible: Record<LayerGroup, boolean>) {
+  for (const [group, layers] of Object.entries(LAYER_GROUPS) as [LayerGroup, string[]][]) {
+    for (const id of layers) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible[group] ? 'visible' : 'none');
+    }
+  }
+}
