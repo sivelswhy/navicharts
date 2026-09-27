@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import type { IvaoFlightPlan, IvaoPilot } from '../lib/ivao.ts';
 import { GROUP_OF, groupColor } from '../lib/chartGroups.ts';
 import { fetchCharts } from '../lib/data.ts';
-import type { FlightRoute, Procedure, RouteChange, Terminal } from '../lib/route.ts';
+import type { FlightRoute, Procedure, RouteChange, RouteProgress, Terminal } from '../lib/route.ts';
 import type { Chart } from '../lib/types.ts';
+import { WeatherSection } from './Weather.tsx';
 
 export const EXAMPLE_ROUTE =
   'LFPG/27L N0481F350 AGOP6A AGOPA DCT ARKIP DCT ARMAL DCT ARTAX DCT BEBIX DCT LMG DCT UVELI DCT OSMOB DCT VAVIX DCT MAGEC MAGE2S LFBZ/27';
@@ -19,6 +21,106 @@ interface Props {
   openChart: Chart | null;
   /** Changement de piste, de SID ou de STAR (la route texte est réécrite puis retracée) */
   onChange: (change: RouteChange) => void;
+  ivao: IvaoLink;
+}
+
+interface IvaoLink {
+  vid: string;
+  onLink: (vid: string) => void;
+  pilot: IvaoPilot | null;
+  flightPlan: IvaoFlightPlan | null;
+  loading: boolean;
+  error: boolean;
+  follow: boolean;
+  onFollow: (follow: boolean) => void;
+  progress: RouteProgress | null;
+}
+
+/** Liaison avec un vol IVAO : le plan de vol déposé est importé automatiquement et l'avion est suivi */
+function IvaoSection({ ivao }: { ivao: IvaoLink }) {
+  const [draft, setDraft] = useState('');
+  const { pilot, flightPlan, progress } = ivao;
+
+  if (!ivao.vid) {
+    return (
+      <section className="ivao">
+        <h3 className="list-heading">Vol IVAO</h3>
+        <form
+          className="ivao-link"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (/^\d{3,8}$/.test(draft.trim())) ivao.onLink(draft.trim());
+          }}
+        >
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value.replace(/\D/g, ''))}
+            placeholder="Votre VID IVAO"
+            inputMode="numeric"
+            aria-label="VID IVAO"
+          />
+          <button type="submit" disabled={!/^\d{3,8}$/.test(draft)}>
+            Lier
+          </button>
+        </form>
+        <p className="footnote">Votre plan de vol déposé sur IVAO sera importé et votre avion suivi sur la carte.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="ivao">
+      <h3 className="list-heading">
+        Vol IVAO · VID {ivao.vid}
+        <button className="link-button" onClick={() => ivao.onLink('')}>
+          Délier
+        </button>
+      </h3>
+      {ivao.loading ? (
+        <p className="placeholder">Recherche de votre session…</p>
+      ) : ivao.error && !pilot ? (
+        <p className="placeholder error">IVAO est injoignable pour le moment.</p>
+      ) : !pilot ? (
+        <p className="placeholder">Aucune session de pilote en cours pour ce VID. Le suivi démarrera dès votre connexion.</p>
+      ) : (
+        <div className="ivao-status">
+          <div className="ivao-callsign">
+            <span className="live-dot" aria-hidden />
+            {pilot.callsign}
+            {pilot.aircraft && <span className="chip">{pilot.aircraft}</span>}
+            <span className="ivao-state">{pilot.onGround ? 'Au sol' : pilot.state}</span>
+          </div>
+          <dl className="facts">
+            <div>
+              <dt>Altitude</dt>
+              <dd>{pilot.altitude >= 10_000 ? `FL${String(Math.round(pilot.altitude / 100)).padStart(3, '0')}` : `${Math.round(pilot.altitude)} ft`}</dd>
+            </div>
+            <div>
+              <dt>Vitesse sol</dt>
+              <dd>{pilot.groundSpeed} kt</dd>
+            </div>
+            {progress && (
+              <div>
+                <dt>Prochain point</dt>
+                <dd>
+                  {progress.next.ident} · {Math.round(progress.toNextNm)} NM
+                </dd>
+              </div>
+            )}
+            <div>
+              <dt>Restant</dt>
+              <dd>{progress ? `${Math.round(progress.remainingNm)} NM` : pilot.arrivalDistance !== null ? `${Math.round(pilot.arrivalDistance)} NM` : '—'}</dd>
+            </div>
+          </dl>
+          <label className="switch-row ivao-follow">
+            <span>Suivre l'avion sur la carte</span>
+            <input type="checkbox" role="switch" checked={ivao.follow} onChange={(e) => ivao.onFollow(e.target.checked)} />
+          </label>
+          {!flightPlan && <p className="footnote">Aucun plan de vol déposé : la route ne peut pas être importée.</p>}
+        </div>
+      )}
+    </section>
+  );
 }
 
 /** Piste et procédure d'un terminal, modifiables */
@@ -172,12 +274,13 @@ function TerminalCharts({
 }
 
 /** Saisie d'une route au format plan de vol OACI, résumé du vol et cartes associées */
-export function FlightPanel({ text, onText, route, status, onShow, onClear, onSelectAirport, onOpenChart, openChart, onChange }: Props) {
+export function FlightPanel({ text, onText, route, status, onShow, onClear, onSelectAirport, onOpenChart, openChart, onChange, ivao }: Props) {
   let cumulative = 0;
   return (
     <div className="flight">
       <div className="flight-form">
         <h2>Plan de vol</h2>
+        <IvaoSection ivao={ivao} />
         <label className="flight-label" htmlFor="route-input">
           Route (format plan de vol OACI)
         </label>
@@ -242,6 +345,8 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
               </div>
             </dl>
           </div>
+
+          <WeatherSection departure={route.departure?.airport.icao || null} arrival={route.arrival?.airport.icao || null} />
 
           {(route.departure || route.arrival) && (
             <section className="pickers">

@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { CATEGORY_LABELS, CHART_GROUPS, GROUP_LABELS, GROUP_OF, groupColor, type ChartGroup } from '../lib/chartGroups.ts';
 import { fetchCharts, loadDetails } from '../lib/data.ts';
+import { useIvaoAtis, useMetars } from '../lib/metar.ts';
 import type { Airport, AirportCharts, AirportDetails, Chart, ChartCategory } from '../lib/types.ts';
 import { IconClose, IconExternal, IconOverlay, IconPin } from './icons.tsx';
+import { AirportWeather, CATEGORY_LABEL } from './Weather.tsx';
 
 const TYPE_LABELS: Record<Airport['type'], string> = {
   large_airport: 'Grand aéroport',
@@ -36,6 +38,8 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
   const [tab, setTab] = useState<Tab | null>(null);
   const [details, setDetails] = useState<AirportDetails | null>(null);
   const [charts, setCharts] = useState<ChartsState>({ status: 'loading' });
+  const metar = useMetars(airport.icao ? [airport.icao] : [])[airport.icao];
+  const atis = useIvaoAtis(airport.icao || null);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +120,11 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
     if (!details) return <p className="placeholder">Chargement…</p>;
     return (
       <div className="info">
+        {airport.icao && (
+          <div className="info-weather">
+            <AirportWeather icao={airport.icao} role="Météo" metar={metar} atis={atis} />
+          </div>
+        )}
         <dl className="facts">
           <div>
             <dt>Type</dt>
@@ -204,6 +213,20 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
         </div>
         <div className="airport-name">{airport.name}</div>
         {airport.city && <div className="airport-city">{airport.city}</div>}
+        {(metar || atis) && (
+          // Résumé météo toujours visible ; le détail décodé est dans l'onglet INFO
+          <button className="metar-strip" onClick={() => setTab('INFO')} title="Voir la météo décodée">
+            {metar?.category && (
+              <span className={`flight-category ${metar.category.toLowerCase()}`}>{CATEGORY_LABEL[metar.category] ?? metar.category}</span>
+            )}
+            {atis && (
+              <span className="atis-badge" title={`ATIS IVAO ${atis.callsign}`}>
+                ATIS {atis.letter}
+              </span>
+            )}
+            <span className="metar-strip-text">{metar ? metar.raw.replace(/^(METAR|SPECI)\s+/, '') : 'Pas de METAR'}</span>
+          </button>
+        )}
       </header>
 
       <nav className="group-tabs" role="tablist">

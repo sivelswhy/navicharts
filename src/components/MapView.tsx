@@ -6,7 +6,7 @@ import type { Feature, FeatureCollection, Point } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { loadAeroIcons } from '../lib/aeroIcons.ts';
-import { addAeroLayers, GROUND_SOURCE, setGroupVisibility, type LayerGroup } from '../lib/aeroLayers.ts';
+import { addAeroLayers, GROUND_SOURCE, IVAO_ATCS_SOURCE, IVAO_PILOTS_SOURCE, setGroupVisibility, type LayerGroup } from '../lib/aeroLayers.ts';
 import type { LngLat } from '../lib/georef.ts';
 import { baseStyle, FONT_BOLD, FONT_REGULAR } from '../lib/mapStyle.ts';
 import type { Airport } from '../lib/types.ts';
@@ -65,6 +65,13 @@ interface Props {
   route: FeatureCollection | null;
   /** Point sur lequel centrer la carte (nouvel objet à chaque demande) */
   focus: { lngLat: LngLat } | null;
+  /** Trafic IVAO (avions et contrôleurs) */
+  traffic: { pilots: FeatureCollection; atcs: FeatureCollection } | null;
+  /** Avion suivi (vol IVAO de l'utilisateur) et trace déjà parcourue */
+  ownAircraft: { lngLat: LngLat; heading: number; callsign: string } | null;
+  ownTrail: LngLat[];
+  /** Garder la carte centrée sur l'avion suivi */
+  follow: boolean;
 }
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -98,7 +105,22 @@ const PHASE_COLOR: maplibregl.ExpressionSpecification = [
   ROUTE_COLOR,
 ];
 
-export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoints, controlPoints, layers, route, focus }: Props) {
+export function MapView({
+  selected,
+  onSelect,
+  overlay,
+  picking,
+  onPick,
+  snapPoints,
+  controlPoints,
+  layers,
+  route,
+  focus,
+  traffic,
+  ownAircraft,
+  ownTrail,
+  follow,
+}: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
@@ -241,6 +263,48 @@ export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoin
         paint: { 'text-color': PHASE_COLOR, 'text-halo-color': '#fff', 'text-halo-width': 2 },
       });
 
+      // Vol suivi : trace parcourue et avion, tout en haut
+      m.addSource('own-trail', { type: 'geojson', data: EMPTY });
+      m.addSource('own-aircraft', { type: 'geojson', data: EMPTY });
+      m.addLayer({
+        id: 'own-trail',
+        type: 'line',
+        source: 'own-trail',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#d99a00', 'line-width': 2.5, 'line-opacity': 0.85 },
+      });
+      // Halo sous l'avion de l'utilisateur, pour le repérer parmi le trafic
+      m.addLayer({
+        id: 'own-aircraft-halo',
+        type: 'circle',
+        source: 'own-aircraft',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 20, 10, 27],
+          'circle-color': 'rgba(245, 183, 0, 0.25)',
+          'circle-stroke-color': '#f5b700',
+          'circle-stroke-width': 2,
+        },
+      });
+      m.addLayer({
+        id: 'own-aircraft',
+        type: 'symbol',
+        source: 'own-aircraft',
+        layout: {
+          'icon-image': 'aircraft-own',
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 1.8, 10, 2.3],
+          'icon-rotate': ['get', 'heading'],
+          'icon-rotation-alignment': 'map',
+          'icon-allow-overlap': true,
+          'text-field': ['get', 'callsign'],
+          'text-font': FONT_BOLD,
+          'text-size': 11.5,
+          'text-offset': [0, 1.5],
+          'text-anchor': 'top',
+          'text-allow-overlap': true,
+        },
+        paint: { 'text-color': '#1f1f1f', 'text-halo-color': '#f5b700', 'text-halo-width': 2.5 },
+      });
+
       m.on('click', (e) => {
         if (!handlers.current.picking) return;
         // Aimantation au repère le plus proche (seuil de piste, balise, aérodrome)
@@ -380,6 +444,40 @@ export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoin
     if (!m || !ready || !focus) return;
     m.flyTo({ center: focus.lngLat, zoom: Math.max(m.getZoom(), 9), speed: 1.6 });
   }, [focus, ready]);
+
+  // Trafic IVAO
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    (m.getSource(IVAO_PILOTS_SOURCE) as GeoJSONSource).setData(traffic?.pilots ?? EMPTY);
+    (m.getSource(IVAO_ATCS_SOURCE) as GeoJSONSource).setData(traffic?.atcs ?? EMPTY);
+  }, [traffic, ready]);
+
+  // Vol suivi, et recentrage continu si demandé
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    (m.getSource('own-aircraft') as GeoJSONSource).setData(
+      ownAircraft
+        ? {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: ownAircraft.lngLat },
+                properties: { heading: ownAircraft.heading, callsign: ownAircraft.callsign },
+              },
+            ],
+          }
+        : EMPTY,
+    );
+    (m.getSource('own-trail') as GeoJSONSource).setData(
+      ownTrail.length >= 2
+        ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: { type: 'LineString', coordinates: ownTrail }, properties: {} }] }
+        : EMPTY,
+    );
+    if (follow && ownAircraft) m.easeTo({ center: ownAircraft.lngLat, duration: 1000 });
+  }, [ownAircraft, ownTrail, follow, ready]);
 
   // Couches affichées
   useEffect(() => {

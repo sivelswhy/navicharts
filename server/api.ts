@@ -4,6 +4,8 @@ import { Readable } from 'node:stream';
 import { currentCycle } from './airac.ts';
 import { computeGeoref, type GeorefResult } from './georef.ts';
 import { getGround } from './ground.ts';
+import { getAtis, getPilot, getTraffic } from './ivao.ts';
+import { getMetars } from './metar.ts';
 import { getProcedures } from './procedures.ts';
 import { CHART_HOSTS, getCharts } from './charts.ts';
 
@@ -96,6 +98,49 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
         sendJson(res, 200, { type: 'FeatureCollection', features: await getGround(ground[1], lat, lon) });
       } catch (err) {
         sendJson(res, 503, { error: err instanceof Error ? err.message : 'OpenStreetMap indisponible' });
+      }
+      return true;
+    }
+
+    // Trafic IVAO en direct, et session de vol d'un membre (VID)
+    if (url.pathname === '/api/ivao') {
+      try {
+        sendJson(res, 200, await getTraffic());
+      } catch (err) {
+        sendJson(res, 503, { error: err instanceof Error ? err.message : 'IVAO indisponible' });
+      }
+      return true;
+    }
+    const ivaoAtis = url.pathname.match(/^\/api\/ivao\/atis\/([A-Z]{4})$/);
+    if (ivaoAtis) {
+      try {
+        sendJson(res, 200, { atis: await getAtis(ivaoAtis[1]) });
+      } catch (err) {
+        sendJson(res, 503, { error: err instanceof Error ? err.message : 'IVAO indisponible' });
+      }
+      return true;
+    }
+    const ivaoPilot = url.pathname.match(/^\/api\/ivao\/pilot\/(\d{3,8})$/);
+    if (ivaoPilot) {
+      try {
+        sendJson(res, 200, await getPilot(Number(ivaoPilot[1])));
+      } catch (err) {
+        sendJson(res, 503, { error: err instanceof Error ? err.message : 'IVAO indisponible' });
+      }
+      return true;
+    }
+
+    // METAR (au plus 4 aérodromes par requête)
+    if (url.pathname === '/api/metar') {
+      const ids = (url.searchParams.get('ids') ?? '').split(',').filter((i) => /^[A-Z0-9]{4}$/.test(i)).slice(0, 4);
+      if (!ids.length) {
+        sendJson(res, 400, { error: 'Indicatifs OACI attendus' });
+        return true;
+      }
+      try {
+        sendJson(res, 200, { metars: await getMetars(ids) });
+      } catch (err) {
+        sendJson(res, 503, { error: err instanceof Error ? err.message : 'Météo indisponible' });
       }
       return true;
     }

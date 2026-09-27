@@ -4,7 +4,7 @@ import type { ExpressionSpecification, FilterSpecification, Map as MapLibreMap }
 import { AERO_COLORS, NAVAID_ICON } from './aeroIcons.ts';
 import { FONT_BOLD, FONT_REGULAR } from './mapStyle.ts';
 
-export type LayerGroup = 'airspaces' | 'airways' | 'waypoints' | 'navaids' | 'airports' | 'ground';
+export type LayerGroup = 'airspaces' | 'airways' | 'waypoints' | 'navaids' | 'airports' | 'ground' | 'ivao';
 
 export const LAYER_GROUP_LABELS: Record<LayerGroup, string> = {
   airspaces: 'Espaces aériens (France)',
@@ -13,6 +13,7 @@ export const LAYER_GROUP_LABELS: Record<LayerGroup, string> = {
   navaids: 'Balises',
   airports: 'Aérodromes',
   ground: 'Plan au sol',
+  ivao: 'Trafic IVAO (en direct)',
 };
 
 export const LAYER_GROUPS: Record<LayerGroup, string[]> = {
@@ -22,7 +23,12 @@ export const LAYER_GROUPS: Record<LayerGroup, string[]> = {
   navaids: ['navaids'],
   airports: ['runways', 'runway-ends', 'airports'],
   ground: ['ground-apron', 'ground-taxiway', 'ground-taxiway-centerline', 'ground-runway', 'ground-taxiway-labels', 'ground-holding', 'ground-stands'],
+  ivao: ['ivao-atcs', 'ivao-pilots'],
 };
+
+/** Sources alimentées par le trafic IVAO (voir MapView) */
+export const IVAO_PILOTS_SOURCE = 'ivao-pilots';
+export const IVAO_ATCS_SOURCE = 'ivao-atcs';
 
 /** Source alimentée à la demande avec le plan au sol des aérodromes visibles (voir MapView) */
 export const GROUND_SOURCE = 'ground';
@@ -55,6 +61,8 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
   map.addSource('airports', { type: 'geojson', data: data('airports') });
   map.addSource('runway-ends', { type: 'geojson', data: data('runway-ends') });
   map.addSource(GROUND_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource(IVAO_PILOTS_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource(IVAO_ATCS_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
 
   const add = (layer: Parameters<MapLibreMap['addLayer']>[0]) => map.addLayer(layer, beforeId);
 
@@ -312,6 +320,45 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       'text-halo-color': HALO,
       'text-halo-width': 1.6,
     },
+  });
+
+  // Trafic IVAO : contrôleurs (position de leur secteur) et avions orientés selon leur cap
+  add({
+    id: 'ivao-atcs',
+    type: 'symbol',
+    source: IVAO_ATCS_SOURCE,
+    layout: {
+      'icon-image': 'atc',
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 4, 0.55, 9, 0.85],
+      'icon-allow-overlap': true,
+      'text-field': expr(['step', ['zoom'], '', 6, ['format', ['get', 'callsign'], {}, '\n', {}, ['get', 'frequency'], { 'font-scale': 0.85 }]]),
+      'text-font': FONT_BOLD,
+      'text-size': 9.5,
+      'text-offset': [0, 1.1],
+      'text-anchor': 'top',
+      'text-optional': true,
+    },
+    paint: { 'text-color': '#0f766e', 'text-halo-color': HALO, 'text-halo-width': 1.6 },
+  });
+  add({
+    id: 'ivao-pilots',
+    type: 'symbol',
+    source: IVAO_PILOTS_SOURCE,
+    layout: {
+      'icon-image': expr(['case', ['get', 'onGround'], 'aircraft-ground', 'aircraft']),
+      // Bien visibles même à l'échelle d'un continent
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 3, 1.35, 7, 1.6, 12, 1.9],
+      'icon-rotate': ['get', 'heading'],
+      'icon-rotation-alignment': 'map',
+      'icon-allow-overlap': true,
+      'text-field': expr(['step', ['zoom'], '', 5.5, ['get', 'callsign'], 8, ['format', ['get', 'callsign'], {}, '\n', {}, ['get', 'info'], { 'font-scale': 0.8, 'text-font': ['literal', FONT_REGULAR] }]]),
+      'text-font': FONT_BOLD,
+      'text-size': 10,
+      'text-offset': [0, 1.3],
+      'text-anchor': 'top',
+      'text-optional': true,
+    },
+    paint: { 'text-color': '#1e3a8a', 'text-halo-color': HALO, 'text-halo-width': 1.8 },
   });
 
   // Balises (au-dessus du reste)

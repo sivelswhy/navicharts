@@ -11,6 +11,8 @@ const DEFAULTS: Record<LayerGroup, boolean> = {
   navaids: true,
   airports: true,
   ground: true,
+  // Trafic IVAO : interroge le réseau toutes les 20 s, activé à la demande
+  ivao: false,
 };
 
 function read(): Record<LayerGroup, boolean> {

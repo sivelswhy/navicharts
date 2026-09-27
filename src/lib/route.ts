@@ -230,6 +230,10 @@ const PROCEDURE = /^[A-Z]{2,5}\d[A-Z]?$/;
 const AIRWAY = /^[A-Z]{1,2}\d{1,4}[A-Z]?$/;
 const COORDINATES = /^(\d{2})(\d{2})?([NS])(\d{3})(\d{2})?([EW])$/;
 const TERMINAL = /^([A-Z]{4})(?:\/([0-9]{2}[LRC]?))?$/;
+// Au-delà, un point nommé est sans doute un homonyme d'un point hors de nos données (autre continent)
+const MAX_NAMED_LEG_NM = 600;
+// Au-delà, l'avion suivi n'est plus sur la partie tracée de la route
+const OFF_ROUTE_NM = 30;
 
 function parseCoordinates(token: string): LngLat | null {
   const m = COORDINATES.exec(token);
@@ -294,8 +298,9 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
     if (coords) return { ident, kind: 'coordinates', lngLat: coords };
     const candidates = nav.byIdent.get(ident);
     if (!candidates?.length) return null;
-    // Identifiants homonymes : on retient le plus proche du point précédent
+    // Identifiants homonymes : on retient le plus proche du point précédent, s'il est plausible
     const best = previous ? candidates.reduce((a, b) => (distanceNm(previous!, a.lngLat) <= distanceNm(previous!, b.lngLat) ? a : b)) : candidates[0];
+    if (previous && best.kind !== 'airport' && distanceNm(previous, best.lngLat) > MAX_NAMED_LEG_NM) return null;
     return { ident, ...best };
   };
 
@@ -448,6 +453,43 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
     route.totalNm += distance;
   }
   return route;
+}
+
+export interface RouteProgress {
+  /** Branche en cours (index dans route.legs) et point vers lequel l'avion se dirige */
+  legIndex: number;
+  next: RoutePoint;
+  toNextNm: number;
+  /** Distance restante le long de la route jusqu'à l'arrivée */
+  remainingNm: number;
+}
+
+/** Position de l'avion sur la route : branche la plus proche, prochain point et distance restante */
+export function routeProgress(route: FlightRoute, position: LngLat): RouteProgress | null {
+  if (!route.legs.length) return null;
+  // Distance point-segment en projection locale (suffisante pour choisir la branche)
+  const k = Math.cos(toRad(position[1]));
+  const project = ([lon, lat]: LngLat): [number, number] => [lon * k, lat];
+  const [px, py] = project(position);
+  let best = { index: 0, d: Infinity, t: 0, closest: position };
+  route.legs.forEach((leg, index) => {
+    const [ax, ay] = project(leg.from.lngLat);
+    const [bx, by] = project(leg.to.lngLat);
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1e-12;
+    const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+    const d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+    if (d < best.d) best = { index, d, t, closest: [(ax + t * dx) / k, ay + t * dy] };
+  });
+  // Avion trop loin de la route tracée (route partiellement localisée, déroutement…) : pas de progression fiable
+  if (distanceNm(position, best.closest) > OFF_ROUTE_NM) return null;
+  // Arrivé au bout d'une branche : on vise déjà le point suivant
+  const legIndex = best.t > 0.98 && best.index < route.legs.length - 1 ? best.index + 1 : best.index;
+  const leg = route.legs[legIndex];
+  const toNextNm = distanceNm(position, leg.to.lngLat);
+  const remainingNm = toNextNm + route.legs.slice(legIndex + 1).reduce((sum, l) => sum + l.distanceNm, 0);
+  return { legIndex, next: leg.to, toNextNm, remainingNm };
 }
 
 export interface RouteChange {

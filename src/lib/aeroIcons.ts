@@ -40,7 +40,19 @@ function tacanLobes(r: number, color: string): string {
     .join('');
 }
 
+// Silhouette d'avion vue de dessus, nez vers le haut (orientée ensuite selon le cap)
+const AIRCRAFT_PATH =
+  'M16 2.5c1.1 0 1.8 1.2 1.8 2.6v7.3l10.2 6v2.6l-10.2-3.1v6.3l3.2 2.6v2.1L16 27.6l-5 1.3v-2.1l3.2-2.6v-6.3L4 21v-2.6l10.2-6V5.1c0-1.4.7-2.6 1.8-2.6z';
+
 const ICONS: Record<string, string> = {
+  // Trafic IVAO en bleu marine ; l'avion de l'utilisateur en jaune, pour le distinguer au premier coup d'œil
+  aircraft: svg(`<path d="${AIRCRAFT_PATH}" fill="#1e3a8a" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>`),
+  'aircraft-ground': svg(`<path d="${AIRCRAFT_PATH}" fill="#7c8da6" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>`),
+  'aircraft-own': svg(`<path d="${AIRCRAFT_PATH}" fill="#f5b700" stroke="#1f1f1f" stroke-width="1.8" stroke-linejoin="round"/>`),
+  atc: svg(
+    `<circle cx="${C}" cy="${C}" r="9" fill="#fff" stroke="#0f766e" stroke-width="2.5"/>` +
+      `<path d="M${C} 10v12M${C - 4} 22h8M${C - 5} 12a6 6 0 0 1 10 0" fill="none" stroke="#0f766e" stroke-width="2" stroke-linecap="round"/>`,
+  ),
   vor: svg(`<polygon points="${hexagon(10)}" fill="#fff" stroke="${AERO_COLORS.vor}" stroke-width="2.5"/>${dot(AERO_COLORS.vor)}`),
   'vor-dme': svg(
     `<rect x="4" y="5" width="24" height="22" fill="#fff" stroke="${AERO_COLORS.vor}" stroke-width="2.2"/>` +

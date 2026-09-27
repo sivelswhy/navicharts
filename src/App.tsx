@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AirportPanel } from './components/AirportPanel.tsx';
 import { ChartViewer } from './components/ChartViewer.tsx';
 import { FlightPanel } from './components/FlightPanel.tsx';
@@ -11,7 +11,8 @@ import { RouteStrip } from './components/RouteStrip.tsx';
 import { SearchBox } from './components/SearchBox.tsx';
 import { fetchAutoGeoref, loadAirports, loadDetails, type AutoGeoref } from './lib/data.ts';
 import { usePins } from './lib/pins.ts';
-import { editRoute, parseRoute, routeGeoJson, type FlightRoute, type RouteChange } from './lib/route.ts';
+import { flightPlanText, trafficGeoJson, useIvaoPilot, useIvaoTraffic } from './lib/ivao.ts';
+import { editRoute, parseRoute, routeGeoJson, routeProgress, type FlightRoute, type RouteChange } from './lib/route.ts';
 import { fitTransform, pageCorners, useGeorefs, type ControlPoint, type LngLat, type PdfPoint } from './lib/georef.ts';
 import { renderOverlay, type OverlayImage, type OverlayStyle } from './lib/pdf.ts';
 import type { Airport, Chart } from './lib/types.ts';
@@ -36,6 +37,25 @@ type OverlayImageState = { url: string; style: OverlayStyle } & (
 );
 
 const ROUTE_KEY = 'navicharts:route';
+const IVAO_VID_KEY = 'navicharts:ivao-vid';
+const NO_TRAIL: LngLat[] = [];
+
+function readStored(key: string): string {
+  try {
+    return localStorage.getItem(key) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function store(key: string, value: string) {
+  try {
+    if (value) localStorage.setItem(key, value);
+    else localStorage.removeItem(key);
+  } catch {
+    // préférence non mémorisée
+  }
+}
 const NO_SNAP: SnapPoint[] = [];
 const NO_POINTS: LngLat[] = [];
 const NO_CONTROL_POINTS: ControlPoint[] = [];
@@ -78,6 +98,60 @@ export function App() {
       setRouteStatus('error');
     }
   }, []);
+
+  // ───────── IVAO ─────────
+
+  const traffic = useIvaoTraffic(layers.ivao);
+  const [ivaoVid, setIvaoVid] = useState(() => readStored(IVAO_VID_KEY));
+  const [follow, setFollow] = useState(false);
+  const own = useIvaoPilot(ivaoVid || null);
+  const ownPilot = own.data?.pilot ?? null;
+  const [trail, setTrail] = useState<{ session: number; points: LngLat[] } | null>(null);
+  const importedPlan = useRef<string | null>(null);
+
+  const linkIvao = useCallback((vid: string) => {
+    store(IVAO_VID_KEY, vid);
+    setIvaoVid(vid);
+    setTrail(null);
+    importedPlan.current = null;
+    if (!vid) setFollow(false);
+  }, []);
+
+  // Trace parcourue, accumulée au fil des positions reçues pendant la session
+  useEffect(() => {
+    if (!ownPilot) return;
+    const here: LngLat = [ownPilot.lon, ownPilot.lat];
+    setTrail((prev) => {
+      if (!prev || prev.session !== ownPilot.sessionId) return { session: ownPilot.sessionId, points: [here] };
+      const last = prev.points.at(-1)!;
+      return last[0] === here[0] && last[1] === here[1] ? prev : { ...prev, points: [...prev.points, here] };
+    });
+  }, [ownPilot]);
+
+  // Plan de vol déposé sur IVAO : importé et tracé à chaque nouveau plan ou nouvelle révision
+  const ownPlan = own.data?.flightPlan ?? null;
+  useEffect(() => {
+    if (!ownPlan?.route && !ownPlan?.departure) return;
+    const key = `${ownPlan.id}:${ownPlan.revision}`;
+    if (importedPlan.current === key) return;
+    importedPlan.current = key;
+    const text = flightPlanText(ownPlan);
+    setRouteText(text);
+    traceRoute(text);
+  }, [ownPlan, traceRoute]);
+
+  const trafficFeatures = useMemo(
+    () => (layers.ivao && traffic.data ? trafficGeoJson(traffic.data, ownPilot?.vid ?? null) : null),
+    [layers.ivao, traffic.data, ownPilot?.vid],
+  );
+  const ownAircraft = useMemo(
+    () => (ownPilot ? { lngLat: [ownPilot.lon, ownPilot.lat] as LngLat, heading: ownPilot.heading, callsign: ownPilot.callsign } : null),
+    [ownPilot],
+  );
+  const progress = useMemo(
+    () => (flightRoute && ownPilot ? routeProgress(flightRoute, [ownPilot.lon, ownPilot.lat]) : null),
+    [flightRoute, ownPilot],
+  );
 
   // Piste, SID ou STAR choisie dans le panneau : la route texte est réécrite puis retracée
   const changeRoute = useCallback(
@@ -316,6 +390,17 @@ export function App() {
               status={routeStatus}
               onShow={() => traceRoute(routeText)}
               onChange={changeRoute}
+              ivao={{
+                vid: ivaoVid,
+                onLink: linkIvao,
+                pilot: ownPilot,
+                flightPlan: ownPlan,
+                loading: Boolean(ivaoVid) && !own.data && !own.error,
+                error: own.error,
+                follow,
+                onFollow: setFollow,
+                progress,
+              }}
               onClear={() => setFlightRoute(null)}
               onSelectAirport={(ident) => {
                 select(ident);
@@ -363,9 +448,18 @@ export function App() {
             layers={layers}
             route={routeFeatures}
             focus={mapFocus}
+            traffic={trafficFeatures}
+            ownAircraft={ownAircraft}
+            ownTrail={trail?.points ?? NO_TRAIL}
+            follow={follow}
           />
           {flightRoute && (
-            <RouteStrip route={flightRoute} onFocus={(lngLat) => setMapFocus({ lngLat })} onClear={() => setFlightRoute(null)} />
+            <RouteStrip
+              route={flightRoute}
+              nextLeg={progress?.legIndex ?? null}
+              onFocus={(lngLat) => setMapFocus({ lngLat })}
+              onClear={() => setFlightRoute(null)}
+            />
           )}
           <button
             className={layersOpen ? 'map-layers-button on' : 'map-layers-button'}
