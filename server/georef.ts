@@ -25,7 +25,7 @@ interface Glyph {
   isSpace: boolean;
 }
 
-interface Line {
+export interface Line {
   text: string;
   /** Matrice de rendu du texte en espace page [a, b, c, d, e, f] au début de la ligne */
   transform: number[];
@@ -116,7 +116,7 @@ function apply(m: Matrix, x: number, y: number): [number, number] {
  * et sa position exacte (l'extraction de texte de pdf.js confond certains codes avec des espaces),
  * ainsi que les segments courts susceptibles d'être des traits de graduation.
  */
-async function readPage(page: pdfjs.PDFPageProxy): Promise<{ lines: Line[]; segments: Segment[] }> {
+export async function readPage(page: pdfjs.PDFPageProxy): Promise<{ lines: Line[]; segments: Segment[] }> {
   const ops = await page.getOperatorList();
   const OPS = pdfjs.OPS;
   const fragments: Line[] = [];
@@ -742,4 +742,5 @@ export async function computeGeoref(pdfData: Uint8Array, expected?: [number, num
     await task.destroy();
   }
 }
+
 

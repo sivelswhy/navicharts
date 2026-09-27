@@ -7,10 +7,11 @@ import { LayerControl, useLayerVisibility } from './components/LayerControl.tsx'
 import { MapView, type MapOverlay, type SnapPoint } from './components/MapView.tsx';
 import { CalibrationBar, OverlayPanel } from './components/OverlayControls.tsx';
 import { Pinboard } from './components/Pinboard.tsx';
+import { RouteStrip } from './components/RouteStrip.tsx';
 import { SearchBox } from './components/SearchBox.tsx';
 import { fetchAutoGeoref, loadAirports, loadDetails, type AutoGeoref } from './lib/data.ts';
 import { usePins } from './lib/pins.ts';
-import { parseRoute, routeGeoJson, type FlightRoute } from './lib/route.ts';
+import { editRoute, parseRoute, routeGeoJson, type FlightRoute, type RouteChange } from './lib/route.ts';
 import { fitTransform, pageCorners, useGeorefs, type ControlPoint, type LngLat, type PdfPoint } from './lib/georef.ts';
 import { renderOverlay, type OverlayImage, type OverlayStyle } from './lib/pdf.ts';
 import type { Airport, Chart } from './lib/types.ts';
@@ -59,23 +60,35 @@ export function App() {
     }
   });
   const [flightRoute, setFlightRoute] = useState<FlightRoute | null>(null);
+  const [mapFocus, setMapFocus] = useState<{ lngLat: LngLat } | null>(null);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const routeFeatures = useMemo(() => (flightRoute ? routeGeoJson(flightRoute) : null), [flightRoute]);
 
-  const showRoute = useCallback(async () => {
+  const traceRoute = useCallback(async (text: string) => {
     try {
-      localStorage.setItem(ROUTE_KEY, routeText);
+      localStorage.setItem(ROUTE_KEY, text);
     } catch {
       // route non mémorisée
     }
     setRouteStatus('loading');
     try {
-      setFlightRoute(await parseRoute(routeText));
+      setFlightRoute(await parseRoute(text));
       setRouteStatus('idle');
     } catch {
       setRouteStatus('error');
     }
-  }, [routeText]);
+  }, []);
+
+  // Piste, SID ou STAR choisie dans le panneau : la route texte est réécrite puis retracée
+  const changeRoute = useCallback(
+    (change: RouteChange) => {
+      if (!flightRoute) return;
+      const text = editRoute(routeText, flightRoute, change);
+      setRouteText(text);
+      traceRoute(text);
+    },
+    [flightRoute, routeText, traceRoute],
+  );
 
   /** Bouton du rail : ouvre la vue demandée, ou replie le panneau si elle est déjà affichée */
   const toggleDrawer = (view: 'charts' | 'flight') => {
@@ -301,7 +314,8 @@ export function App() {
               onText={setRouteText}
               route={flightRoute}
               status={routeStatus}
-              onShow={showRoute}
+              onShow={() => traceRoute(routeText)}
+              onChange={changeRoute}
               onClear={() => setFlightRoute(null)}
               onSelectAirport={(ident) => {
                 select(ident);
@@ -337,7 +351,7 @@ export function App() {
       </aside>
 
       <main className="main">
-        <div className="stage">
+        <div className={flightRoute ? 'stage with-route' : 'stage'}>
           <MapView
             selected={selected}
             onSelect={select}
@@ -348,7 +362,11 @@ export function App() {
             controlPoints={controlPoints}
             layers={layers}
             route={routeFeatures}
+            focus={mapFocus}
           />
+          {flightRoute && (
+            <RouteStrip route={flightRoute} onFocus={(lngLat) => setMapFocus({ lngLat })} onClear={() => setFlightRoute(null)} />
+          )}
           <button
             className={layersOpen ? 'map-layers-button on' : 'map-layers-button'}
             onClick={() => setLayersOpen((o) => !o)}

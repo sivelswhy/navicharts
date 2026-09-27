@@ -1,8 +1,8 @@
 // Lecture d'une route au format plan de vol OACI (case 15), par exemple :
 //   LFPG/27L N0481F350 AGOP6A AGOPA DCT ARKIP DCT LMG DCT MAGEC MAGE2S LFBZ/27
 // Les points sont résolus dans les données chargées (points de report et routes de l'eAIP France, balises et
-// aérodromes d'Europe). Les SID et STAR ne sont pas décrites point par point : elles sont représentées par un
-// segment direct entre la piste et le premier (ou dernier) point en route.
+// aérodromes d'Europe). Les SID et STAR des aérodromes français sont tracées point par point d'après les tableaux
+// de codage de l'eAIP ; ailleurs, elles sont représentées par un segment direct entre la piste et la route.
 import type { FeatureCollection } from 'geojson';
 import { loadAirports, loadDetails } from './data.ts';
 import type { LngLat } from './georef.ts';
@@ -17,12 +17,18 @@ export interface RoutePoint {
   name?: string;
 }
 
+/** Tracé en route, procédure publiée (SID/STAR), ou segment approximatif (procédure inconnue, fin d'arrivée) */
+export type LegStyle = 'route' | 'procedure' | 'approximate';
+/** Phase du vol, pour la couleur du tracé : départ (SID), croisière, arrivée (STAR et approche) */
+export type LegPhase = 'departure' | 'enroute' | 'arrival';
+
 export interface RouteLeg {
   from: RoutePoint;
   to: RoutePoint;
   /** « DCT », nom de route aérienne, de SID ou de STAR */
   via: string;
-  procedure: boolean;
+  style: LegStyle;
+  phase: LegPhase;
   distanceNm: number;
   courseT: number;
 }
@@ -46,6 +52,94 @@ export interface FlightRoute {
   totalNm: number;
   /** Éléments de la route qui n'ont pas pu être localisés */
   unresolved: string[];
+  /** Remarques sur le tracé (procédure remplacée par sa révision en vigueur, procédure non tracée…) */
+  notes: string[];
+  /** Procédures effectivement tracées, et choix possibles pour la piste de départ / d'arrivée (France) */
+  sidUsed: Procedure | null;
+  starUsed: Procedure | null;
+  sidOptions: Procedure[];
+  starOptions: Procedure[];
+  departureRunways: string[];
+  arrivalRunways: string[];
+}
+
+// ───────── SID et STAR ─────────
+
+export interface Procedure {
+  type: 'SID' | 'STAR';
+  name: string;
+  ident: string;
+  runways: string[];
+  fixes: string[];
+}
+
+interface AirportProcedures {
+  procedures: Procedure[];
+  waypoints: Record<string, LngLat>;
+}
+
+/** Procédures publiées dans les tableaux de codage de l'eAIP France (non disponibles ailleurs) */
+async function fetchProcedures(icao: string): Promise<AirportProcedures | null> {
+  if (!/^LF[A-Z]{2}$/.test(icao)) return null;
+  const res = await fetch(`/api/procedures/${icao}`);
+  return res.ok ? res.json() : null;
+}
+
+/**
+ * Procédure demandée pour la piste donnée. Si la désignation exacte n'existe plus (révision : MAGE2S → MAGE3S),
+ * on retient la même procédure dans sa révision en vigueur.
+ */
+/** Point de transition d'une procédure : dernier point d'une SID, premier point d'une STAR */
+const transitionOf = (p: Procedure) => (p.type === 'SID' ? p.fixes.at(-1) : p.fixes[0]);
+
+type Match = { procedure: Procedure; reason: 'exact' | 'revision' | 'runway' };
+
+/**
+ * Procédure demandée pour la piste donnée. À défaut : sa révision en vigueur (MAGE2S → MAGE3S), puis la procédure
+ * de cette piste qui dessert le même point de transition (utile quand on change de piste).
+ */
+function findProcedure(
+  data: AirportProcedures,
+  type: 'SID' | 'STAR',
+  ident: string,
+  runway: string | null,
+  transition: string | null,
+): Match | null {
+  const candidates = data.procedures.filter((p) => p.type === type);
+  const onRunway = (p: Procedure) => !runway || p.runways.includes(runway);
+  const revision = new RegExp(`^${ident.replace(/\d(?=[A-Z]?$)/, '\\d')}$`);
+  const exact = candidates.find((p) => p.ident === ident && onRunway(p));
+  if (exact) return { procedure: exact, reason: 'exact' };
+  const revised = candidates.find((p) => revision.test(p.ident) && onRunway(p));
+  if (revised) return { procedure: revised, reason: 'revision' };
+  const sameTransition = transition ? candidates.find((p) => transitionOf(p) === transition && onRunway(p)) : undefined;
+  if (sameTransition) return { procedure: sameTransition, reason: 'runway' };
+  const elsewhere = candidates.find((p) => p.ident === ident);
+  return elsewhere ? { procedure: elsewhere, reason: 'exact' } : null;
+}
+
+/** Procédures proposées pour une piste : celles qui desservent le point de transition de la route d'abord */
+function procedureOptions(data: AirportProcedures | null, type: 'SID' | 'STAR', runway: string | null, transition: string | null): Procedure[] {
+  if (!data) return [];
+  const seen = new Set<string>();
+  return data.procedures
+    .filter((p) => p.type === type && (!runway || p.runways.includes(runway)))
+    .filter((p) => !seen.has(p.ident) && seen.add(p.ident))
+    .sort((a, b) => Number(transitionOf(b) === transition) - Number(transitionOf(a) === transition) || a.ident.localeCompare(b.ident));
+}
+
+function substitutionNote(type: 'SID' | 'STAR', requested: string, match: Match, runway: string | null): string | null {
+  const used = `${match.procedure.ident} (${match.procedure.name})`;
+  if (match.reason === 'revision') return `${type} ${requested} absente du cycle en vigueur : ${used} tracée à la place.`;
+  if (match.reason === 'runway') return `${type} ${requested} ne dessert pas la piste ${runway ?? '—'} : ${used} tracée à la place.`;
+  return null;
+}
+
+/** Pistes d'un aérodrome (désignations de chaque extrémité) */
+async function runwaysOf(t: Terminal | null): Promise<string[]> {
+  if (!t) return [];
+  const details = await loadDetails(t.airport);
+  return (details?.runways ?? []).flatMap((r) => r.ends.map((e) => e.ident)).filter(Boolean);
 }
 
 // ───────── Données de navigation ─────────
@@ -182,9 +276,16 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
     legs: [],
     totalNm: 0,
     unresolved: [],
+    notes: [],
+    sidUsed: null,
+    starUsed: null,
+    sidOptions: [],
+    starOptions: [],
+    departureRunways: [],
+    arrivalRunways: [],
   };
 
-  const points: { point: RoutePoint; via: string; procedure: boolean }[] = [];
+  const points: { point: RoutePoint; via: string }[] = [];
   let previous: LngLat | null = departure ? [departure.airport.lon, departure.airport.lat] : null;
   let pendingVia = 'DCT';
 
@@ -198,8 +299,8 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
     return { ident, ...best };
   };
 
-  const push = (point: RoutePoint, via: string, procedure = false) => {
-    points.push({ point, via, procedure });
+  const push = (point: RoutePoint, via: string) => {
+    points.push({ point, via });
     previous = point.lngLat;
   };
 
@@ -260,23 +361,136 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
   route.sidFix = points[0]?.point.ident ?? null;
   route.starFix = points.at(-1)?.point.ident ?? null;
 
-  // Segments de procédure : piste → premier point (SID) et dernier point → piste (STAR)
   const start = departure ? await terminalPoint(departure) : null;
   const end = arrival ? await terminalPoint(arrival) : null;
-  const sequence = [
-    ...(start ? [{ point: start, via: '', procedure: false }] : []),
-    ...points.map((p, index) => (index === 0 && start ? { ...p, via: route.sid ?? 'DCT', procedure: Boolean(route.sid) } : p)),
-    ...(end ? [{ point: end, via: route.star ?? 'DCT', procedure: Boolean(route.star) }] : []),
-  ];
+  const [depProcedures, arrProcedures, departureRunways, arrivalRunways] = await Promise.all([
+    departure ? fetchProcedures(departure.airport.icao) : null,
+    arrival ? fetchProcedures(arrival.airport.icao) : null,
+    runwaysOf(departure),
+    runwaysOf(arrival),
+  ]);
+  route.departureRunways = departureRunways;
+  route.arrivalRunways = arrivalRunways;
+  route.sidOptions = procedureOptions(depProcedures, 'SID', departure?.runway ?? null, route.sidFix);
+  route.starOptions = procedureOptions(arrProcedures, 'STAR', arrival?.runway ?? null, route.starFix);
+
+  /** Points d'une procédure, localisés d'après ses propres coordonnées puis les données en route */
+  const procedurePoints = (fixes: string[], data: AirportProcedures, near: LngLat): RoutePoint[] =>
+    fixes.flatMap((ident) => {
+      const own = data.waypoints[ident];
+      if (own) return [{ ident, kind: 'waypoint' as const, lngLat: own }];
+      previous = near;
+      const found = resolve(ident);
+      return found ? [found] : [];
+    });
+
+  const sequence: { point: RoutePoint; via: string; style: LegStyle; phase: LegPhase }[] = [];
+  if (start) sequence.push({ point: start, via: '', style: 'route', phase: 'departure' });
+
+  // Départ : SID publiée jusqu'au premier point en route, sinon segment direct
+  const sid = route.sid && depProcedures ? findProcedure(depProcedures, 'SID', route.sid, departure!.runway, route.sidFix) : null;
+  route.sidUsed = sid?.procedure ?? null;
+  if (sid) {
+    const fixes = sid.procedure.fixes.at(-1) === route.sidFix ? sid.procedure.fixes.slice(0, -1) : sid.procedure.fixes;
+    for (const point of procedurePoints(fixes, depProcedures!, start!.lngLat)) {
+      sequence.push({ point, via: sid.procedure.ident, style: 'procedure', phase: 'departure' });
+    }
+    const note = substitutionNote('SID', route.sid!, sid, departure!.runway);
+    if (note) route.notes.push(note);
+  } else if (route.sid) {
+    route.notes.push(
+      depProcedures
+        ? `SID ${route.sid} introuvable pour la piste ${departure?.runway ?? '—'} : segment direct.`
+        : `SID ${route.sid} : tracé exact disponible uniquement pour les aérodromes français (segment direct).`,
+    );
+  }
+  points.forEach((p, index) =>
+    sequence.push(
+      index === 0 && start && route.sid
+        ? { ...p, via: sid ? sid.procedure.ident : route.sid, style: sid ? 'procedure' : 'approximate', phase: 'departure' }
+        : { ...p, style: 'route', phase: 'enroute' },
+    ),
+  );
+
+  // Arrivée : STAR publiée depuis le dernier point en route, puis segment jusqu'au seuil de piste
+  const star = route.star && arrProcedures ? findProcedure(arrProcedures, 'STAR', route.star, arrival!.runway, route.starFix) : null;
+  route.starUsed = star?.procedure ?? null;
+  if (star && end) {
+    const fixes = star.procedure.fixes[0] === route.starFix ? star.procedure.fixes.slice(1) : star.procedure.fixes;
+    for (const point of procedurePoints(fixes, arrProcedures!, end.lngLat)) {
+      sequence.push({ point, via: star.procedure.ident, style: 'procedure', phase: 'arrival' });
+    }
+    sequence.push({ point: end, via: 'APP', style: 'approximate', phase: 'arrival' });
+    const note = substitutionNote('STAR', route.star!, star, arrival!.runway);
+    if (note) route.notes.push(note);
+  } else if (end) {
+    sequence.push({
+      point: end,
+      via: route.star ?? 'DCT',
+      style: route.star ? 'approximate' : 'route',
+      phase: route.star ? 'arrival' : 'enroute',
+    });
+    if (route.star) {
+      route.notes.push(
+        arrProcedures
+          ? `STAR ${route.star} introuvable pour la piste ${arrival?.runway ?? '—'} : segment direct.`
+          : `STAR ${route.star} : tracé exact disponible uniquement pour les aérodromes français (segment direct).`,
+      );
+    }
+  }
 
   for (let i = 1; i < sequence.length; i++) {
     const from = sequence[i - 1].point;
     const to = sequence[i].point;
     const distance = distanceNm(from.lngLat, to.lngLat);
-    route.legs.push({ from, to, via: sequence[i].via, procedure: sequence[i].procedure, distanceNm: distance, courseT: courseTrue(from.lngLat, to.lngLat) });
+    const { via, style, phase } = sequence[i];
+    route.legs.push({ from, to, via, style, phase, distanceNm: distance, courseT: courseTrue(from.lngLat, to.lngLat) });
     route.totalNm += distance;
   }
   return route;
+}
+
+export interface RouteChange {
+  departureRunway?: string;
+  arrivalRunway?: string;
+  /** Nouvelle SID / STAR (désignation plan de vol), null pour la retirer */
+  sid?: string | null;
+  star?: string | null;
+}
+
+/** Réécrit la route texte après un choix dans l'interface (piste, SID, STAR), le reste de la route étant conservé */
+export function editRoute(text: string, route: FlightRoute, change: RouteChange): string {
+  const tokens = text.trim().split(/\s+/);
+  const hasDeparture = Boolean(route.departure && TERMINAL.test(tokens[0]));
+  const hasArrival = Boolean(route.arrival && TERMINAL.test(tokens.at(-1) ?? ''));
+
+  if (change.departureRunway && hasDeparture) tokens[0] = `${route.departure!.airport.icao}/${change.departureRunway}`;
+  if (change.arrivalRunway && hasArrival) tokens[tokens.length - 1] = `${route.arrival!.airport.icao}/${change.arrivalRunway}`;
+
+  if (change.sid !== undefined) {
+    const index = route.sid ? tokens.findIndex((t) => t.split('/')[0] === route.sid) : -1;
+    if (index >= 0) {
+      if (change.sid) tokens[index] = change.sid;
+      else tokens.splice(index, 1);
+    } else if (change.sid) {
+      // Juste après l'aérodrome de départ et le groupe vitesse/niveau
+      let at = hasDeparture ? 1 : 0;
+      if (SPEED_LEVEL.test(tokens[at] ?? '')) at++;
+      tokens.splice(at, 0, change.sid);
+    }
+  }
+
+  if (change.star !== undefined) {
+    let index = -1;
+    if (route.star) for (let i = tokens.length - 1; i >= 0 && index < 0; i--) if (tokens[i].split('/')[0] === route.star) index = i;
+    if (index >= 0) {
+      if (change.star) tokens[index] = change.star;
+      else tokens.splice(index, 1);
+    } else if (change.star) {
+      tokens.splice(hasArrival ? tokens.length - 1 : tokens.length, 0, change.star);
+    }
+  }
+  return tokens.join(' ');
 }
 
 /** Parcours d'une route aérienne depuis le point d'entrée jusqu'au point de sortie (points intermédiaires inclus) */
@@ -304,19 +518,27 @@ function walkAirway(graph: Map<string, string[]>, from: string, exitIdent: strin
 // ───────── Affichage ─────────
 
 export function routeGeoJson(route: FlightRoute): FeatureCollection {
-  const points = route.legs.length ? [route.legs[0].from, ...route.legs.map((l) => l.to)] : [];
+  // Chaque point prend la couleur de la branche qui y mène (le départ, celle de la SID)
+  const points = route.legs.length
+    ? [{ point: route.legs[0].from, phase: route.legs[0].phase }, ...route.legs.map((l) => ({ point: l.to, phase: l.phase }))]
+    : [];
   return {
     type: 'FeatureCollection',
     features: [
-      ...route.legs.map((leg) => ({
+      ...route.legs.map((leg, i) => ({
         type: 'Feature' as const,
         geometry: { type: 'LineString' as const, coordinates: [leg.from.lngLat, leg.to.lngLat] },
-        properties: { via: leg.via, procedure: leg.procedure },
+        properties: {
+          style: leg.style,
+          phase: leg.phase,
+          // Nom de la SID, de la STAR ou de la route affiché une seule fois, sur sa première branche
+          label: leg.via !== 'DCT' && leg.via !== route.legs[i - 1]?.via ? leg.via : null,
+        },
       })),
-      ...points.map((p) => ({
+      ...points.map(({ point, phase }) => ({
         type: 'Feature' as const,
-        geometry: { type: 'Point' as const, coordinates: p.lngLat },
-        properties: { ident: p.ident, kind: p.kind },
+        geometry: { type: 'Point' as const, coordinates: point.lngLat },
+        properties: { ident: point.ident, kind: point.kind, phase },
       })),
     ],
   };

@@ -63,6 +63,8 @@ interface Props {
   layers: Record<LayerGroup, boolean>;
   /** Trajet du plan de vol (segments et points) */
   route: FeatureCollection | null;
+  /** Point sur lequel centrer la carte (nouvel objet à chaque demande) */
+  focus: { lngLat: LngLat } | null;
 }
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -82,9 +84,21 @@ function boundsOf(coords: LngLat[]): maplibregl.LngLatBounds {
   return coords.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coords[0], coords[0]));
 }
 
+// Couleurs du trajet par phase de vol (reprises dans styles.css : --route, --sid, --star)
 const ROUTE_COLOR = '#c2188f';
+const SID_COLOR = '#e8590c';
+const STAR_COLOR = '#2b9348';
+const PHASE_COLOR: maplibregl.ExpressionSpecification = [
+  'match',
+  ['get', 'phase'],
+  'departure',
+  SID_COLOR,
+  'arrival',
+  STAR_COLOR,
+  ROUTE_COLOR,
+];
 
-export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoints, controlPoints, layers, route }: Props) {
+export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoints, controlPoints, layers, route, focus }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
@@ -178,38 +192,38 @@ export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoin
         id: 'route-line',
         type: 'line',
         source: 'route',
-        filter: ['all', isLine, ['!', ['to-boolean', ['get', 'procedure']]]],
+        filter: ['all', isLine, ['!=', ['get', 'style'], 'approximate']],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': ROUTE_COLOR, 'line-width': 3 },
+        paint: { 'line-color': PHASE_COLOR, 'line-width': 3 },
       });
-      // SID et STAR : segment indicatif, en tirets
+      // Segments approximatifs (procédure non publiée dans nos données, fin d'approche) : en tirets
       m.addLayer({
         id: 'route-procedure',
         type: 'line',
         source: 'route',
-        filter: ['all', isLine, ['to-boolean', ['get', 'procedure']]],
-        paint: { 'line-color': ROUTE_COLOR, 'line-width': 2.5, 'line-dasharray': [2, 1.5] },
+        filter: ['all', isLine, ['==', ['get', 'style'], 'approximate']],
+        paint: { 'line-color': PHASE_COLOR, 'line-width': 2.5, 'line-dasharray': [2, 1.5] },
       });
       m.addLayer({
         id: 'route-procedure-labels',
         type: 'symbol',
         source: 'route',
-        filter: ['all', isLine, ['to-boolean', ['get', 'procedure']]],
+        filter: ['all', isLine, ['to-boolean', ['get', 'label']]],
         layout: {
           'symbol-placement': 'line-center',
-          'text-field': ['get', 'via'],
+          'text-field': ['get', 'label'],
           'text-font': FONT_BOLD,
           'text-size': 10.5,
           'text-offset': [0, -0.9],
         },
-        paint: { 'text-color': ROUTE_COLOR, 'text-halo-color': '#fff', 'text-halo-width': 2 },
+        paint: { 'text-color': PHASE_COLOR, 'text-halo-color': '#fff', 'text-halo-width': 2 },
       });
       m.addLayer({
         id: 'route-points',
         type: 'circle',
         source: 'route',
         filter: ['==', ['geometry-type'], 'Point'],
-        paint: { 'circle-radius': 4.5, 'circle-color': '#fff', 'circle-stroke-color': ROUTE_COLOR, 'circle-stroke-width': 2.5 },
+        paint: { 'circle-radius': 4.5, 'circle-color': '#fff', 'circle-stroke-color': PHASE_COLOR, 'circle-stroke-width': 2.5 },
       });
       m.addLayer({
         id: 'route-labels',
@@ -224,7 +238,7 @@ export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoin
           'text-offset': [0.8, 0],
           'text-allow-overlap': true,
         },
-        paint: { 'text-color': ROUTE_COLOR, 'text-halo-color': '#fff', 'text-halo-width': 2 },
+        paint: { 'text-color': PHASE_COLOR, 'text-halo-color': '#fff', 'text-halo-width': 2 },
       });
 
       m.on('click', (e) => {
@@ -360,6 +374,12 @@ export function MapView({ selected, onSelect, overlay, picking, onPick, snapPoin
     const coords = (route?.features ?? []).filter((f) => f.geometry.type === 'Point').map((f) => (f.geometry as Point).coordinates as LngLat);
     if (coords.length >= 2) m.fitBounds(boundsOf(coords), { padding: 60, duration: 800, bearing: m.getBearing() });
   }, [route, ready]);
+
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready || !focus) return;
+    m.flyTo({ center: focus.lngLat, zoom: Math.max(m.getZoom(), 9), speed: 1.6 });
+  }, [focus, ready]);
 
   // Couches affichées
   useEffect(() => {

@@ -42,6 +42,14 @@
   --chart-app: #ec7b2c;
   --chart-ref: #9b58d5;
 
+  /* Tracé du plan de vol, par phase (mêmes couleurs sur la carte) */
+  --route: #c2188f;
+  --route-light: #e85bb8;
+  --sid: #e8590c;
+  --sid-light: #ff8a4c;
+  --star: #2b9348;
+  --star-light: #52c46a;
+
   --text: #ffffff;
   --text-2: var(--gray-100);
   --text-3: var(--gray-400);
@@ -739,7 +747,7 @@ h3 {
 }
 
 .flight-arrow {
-  color: #e85bb8;
+  color: var(--route-light);
   font-size: 18px;
 }
 
@@ -748,8 +756,97 @@ h3 {
   padding: 5px 4px;
 }
 
-.table.legs tr.procedure td {
-  color: #e85bb8;
+/* Choix de la piste et des procédures */
+.pickers {
+  padding: 0 8px;
+}
+
+.picker {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 8px;
+}
+
+.picker-airport {
+  width: 44px;
+  padding-bottom: 8px;
+  font: 700 13px/1 var(--font-title);
+}
+
+.picker-field {
+  display: grid;
+  gap: 3px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.picker-field.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.picker-field select {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--bg-200);
+  background: var(--bg-300);
+  color: var(--text);
+  font: 500 12.5px/1 var(--mono);
+}
+
+.picker-field select:focus {
+  outline: none;
+  border-color: var(--blue-25);
+}
+
+.picker-note {
+  margin: 2px 8px 0;
+}
+
+.table.legs tr.departure td {
+  color: var(--sid-light);
+}
+
+.table.legs tr.arrival td {
+  color: var(--star-light);
+}
+
+.route-legend {
+  display: flex;
+  gap: 14px;
+  margin: 0 16px 8px;
+  padding: 0;
+  list-style: none;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.route-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.route-legend li::before {
+  content: '';
+  width: 16px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.route-legend .departure::before {
+  background: var(--sid);
+}
+
+.route-legend .enroute::before {
+  background: var(--route);
+}
+
+.route-legend .arrival::before {
+  background: var(--star);
 }
 
 /* ───────── Pinboard ───────── */
@@ -1052,6 +1149,97 @@ h3 {
   gap: 12px;
   padding: 7px 0;
   cursor: pointer;
+}
+
+/* Bandeau de la route active, en haut de la carte (laisse la place au bouton des couches à droite) */
+.route-strip {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  left: 12px;
+  right: 136px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 4px 0 6px;
+  background: var(--bg-400);
+  border: 1px solid var(--bg-200);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.route-points {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.route-points li {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.route-point {
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font: 600 12px/1 var(--mono);
+  color: var(--text);
+}
+
+.route-point:hover {
+  background: var(--bluegray-600);
+}
+
+.route-point.terminal {
+  background: var(--route);
+  color: #fff;
+  font-family: var(--font-title);
+  font-weight: 700;
+}
+
+.route-point.terminal:hover {
+  background: #d63aa5;
+}
+
+.route-via {
+  padding: 0 3px;
+  color: var(--route-light);
+  font: 600 10.5px/1 var(--mono);
+}
+
+.route-via.departure {
+  color: var(--sid-light);
+}
+
+.route-via.arrival {
+  color: var(--star-light);
+}
+
+.route-via.direct {
+  color: var(--text-3);
+  font-size: 14px;
+}
+
+.route-total {
+  flex: none;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+  color: var(--text-3);
+  font: 600 12px/1 var(--mono);
+}
+
+/* Avec une route active, le panneau de superposition passe sous le bandeau */
+.stage.with-route .overlay-panel {
+  top: 60px;
 }
 
 /* Bouton des couches, en haut à droite de la carte ; son volet s'ouvre juste en dessous */

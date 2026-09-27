@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 import { currentCycle } from './airac.ts';
 import { computeGeoref, type GeorefResult } from './georef.ts';
 import { getGround } from './ground.ts';
+import { getProcedures } from './procedures.ts';
 import { CHART_HOSTS, getCharts } from './charts.ts';
 
 const USER_AGENT = { 'User-Agent': 'NaviCharts (usage personnel)' };
@@ -96,6 +97,13 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
       } catch (err) {
         sendJson(res, 503, { error: err instanceof Error ? err.message : 'OpenStreetMap indisponible' });
       }
+      return true;
+    }
+
+    // SID et STAR (tableaux de codage de l'eAIP France)
+    const procedures = url.pathname.match(/^\/api\/procedures\/(LF[A-Z]{2})$/);
+    if (procedures) {
+      sendJson(res, 200, await getProcedures(procedures[1]));
       return true;
     }
 

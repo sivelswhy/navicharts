@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { GROUP_OF, groupColor } from '../lib/chartGroups.ts';
 import { fetchCharts } from '../lib/data.ts';
-import type { FlightRoute, Terminal } from '../lib/route.ts';
+import type { FlightRoute, Procedure, RouteChange, Terminal } from '../lib/route.ts';
 import type { Chart } from '../lib/types.ts';
 
 export const EXAMPLE_ROUTE =
@@ -17,6 +17,68 @@ interface Props {
   onSelectAirport: (ident: string) => void;
   onOpenChart: (chart: Chart) => void;
   openChart: Chart | null;
+  /** Changement de piste, de SID ou de STAR (la route texte est réécrite puis retracée) */
+  onChange: (change: RouteChange) => void;
+}
+
+/** Piste et procédure d'un terminal, modifiables */
+function ProcedurePicker({
+  label,
+  terminal,
+  runways,
+  options,
+  used,
+  requested,
+  transition,
+  onRunway,
+  onProcedure,
+}: {
+  label: string;
+  terminal: Terminal;
+  runways: string[];
+  options: Procedure[];
+  used: Procedure | null;
+  requested: string | null;
+  transition: string | null;
+  onRunway: (runway: string) => void;
+  onProcedure: (ident: string | null) => void;
+}) {
+  const kind = label === 'SID' ? 'SID' : 'STAR';
+  const current = used?.ident ?? requested ?? '';
+  // La procédure demandée reste listée même si elle n'est pas disponible pour cette piste
+  const listed = current && !options.some((o) => o.ident === current);
+  return (
+    <div className="picker">
+      <span className="picker-airport">{terminal.airport.icao}</span>
+      <label className="picker-field">
+        <span>Piste</span>
+        <select value={terminal.runway ?? ''} onChange={(e) => onRunway(e.target.value)} disabled={!runways.length}>
+          {!terminal.runway && <option value="">—</option>}
+          {runways.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="picker-field grow">
+        <span>{label}</span>
+        <select value={current} onChange={(e) => onProcedure(e.target.value || null)} disabled={!options.length && !current}>
+          <option value="">{options.length ? `Aucune (direct)` : `Pas de ${kind} disponible`}</option>
+          {listed && <option value={current}>{current}</option>}
+          {options.map((o) => {
+            const to = kind === 'SID' ? o.fixes.at(-1) : o.fixes[0];
+            return (
+              <option key={o.ident} value={o.ident}>
+                {o.ident} · {kind === 'SID' ? `→ ${to}` : `${to} →`}
+                {to === transition ? ' ✓' : ''}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+    </div>
+  );
 }
 
 function formatSpeed(speed: string | null): string | null {
@@ -110,7 +172,7 @@ function TerminalCharts({
 }
 
 /** Saisie d'une route au format plan de vol OACI, résumé du vol et cartes associées */
-export function FlightPanel({ text, onText, route, status, onShow, onClear, onSelectAirport, onOpenChart, openChart }: Props) {
+export function FlightPanel({ text, onText, route, status, onShow, onClear, onSelectAirport, onOpenChart, openChart, onChange }: Props) {
   let cumulative = 0;
   return (
     <div className="flight">
@@ -181,6 +243,43 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
             </dl>
           </div>
 
+          {(route.departure || route.arrival) && (
+            <section className="pickers">
+              <h3 className="list-heading">Procédures</h3>
+              {route.departure && (
+                <ProcedurePicker
+                  label="SID"
+                  terminal={route.departure}
+                  runways={route.departureRunways}
+                  options={route.sidOptions}
+                  used={route.sidUsed}
+                  requested={route.sid}
+                  transition={route.sidFix}
+                  onRunway={(departureRunway) => onChange({ departureRunway })}
+                  onProcedure={(sid) => onChange({ sid })}
+                />
+              )}
+              {route.arrival && (
+                <ProcedurePicker
+                  label="STAR"
+                  terminal={route.arrival}
+                  runways={route.arrivalRunways}
+                  options={route.starOptions}
+                  used={route.starUsed}
+                  requested={route.star}
+                  transition={route.starFix}
+                  onRunway={(arrivalRunway) => onChange({ arrivalRunway })}
+                  onProcedure={(star) => onChange({ star })}
+                />
+              )}
+              <p className="footnote picker-note">✓ : dessert le premier (ou dernier) point de votre route. Listes disponibles pour les aérodromes français.</p>
+            </section>
+          )}
+          {route.notes.map((note) => (
+            <p key={note} className="notice">
+              {note}
+            </p>
+          ))}
           {route.unresolved.length > 0 && (
             <p className="notice">
               Éléments non localisés (tracés en direct entre leurs voisins) : {route.unresolved.join(', ')}. Les points de
@@ -196,6 +295,11 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
           )}
 
           <h3 className="list-heading">Branches</h3>
+          <ul className="route-legend" aria-label="Légende du tracé">
+            <li className="departure">SID</li>
+            <li className="enroute">Route</li>
+            <li className="arrival">STAR et approche</li>
+          </ul>
           <table className="table legs">
             <thead>
               <tr>
@@ -210,7 +314,7 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
               {route.legs.map((leg, i) => {
                 cumulative += leg.distanceNm;
                 return (
-                  <tr key={i} className={leg.procedure ? 'procedure' : ''}>
+                  <tr key={i} className={leg.phase}>
                     <td className="mono strong" title={leg.to.name}>
                       {leg.to.ident}
                     </td>
@@ -224,8 +328,8 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
             </tbody>
           </table>
           <p className="footnote">
-            Routes vraies (Rv) et distances orthodromiques. SID et STAR représentées par un segment direct : suivez la carte
-            officielle.
+            Routes vraies (Rv) et distances orthodromiques. SID et STAR d’après les tableaux de codage de l’eAIP (France) ;
+            branches sans point (montée jusqu’à une altitude…) et fin d’approche simplifiées : suivez la carte officielle.
           </p>
         </div>
       )}
