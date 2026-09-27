@@ -42,6 +42,21 @@ n'autorise ni CORS ni l'affichage en iframe.
 
 ⚠️ Données non certifiées, réservées à la simulation. Ne pas utiliser pour la navigation réelle.
 
+### Test local : autorouter (dev uniquement)
+
+En développement (`npm run dev`), les routes aériennes, SID, STAR et points de report viennent des tuiles
+vectorielles d'[autorouter](https://www.autorouter.aero) (couverture Europe) au lieu de nos données eAIP, qui sont
+en veille. Le serveur de dev Vite récupère les tuiles **à la demande** (zone affichée, zone du vol analysé) et les
+garde dans `.cache/autorouter-tiles` : rien à télécharger d'avance, et les tuiles ne sont ni versionnées ni
+redistribuées. Le build de production n'utilise pas autorouter.
+
+- `scripts/autorouter-tiles.ts` : chargement d'une tuile (cache, sinon autorouter)
+- `scripts/autorouter-mvt.ts` : décodage des tuiles MVT
+- `scripts/autorouter-procedures.ts` : SID et STAR d'un aérodrome (`/dev/autorouter/procedures/:icao`)
+- `scripts/autorouter-nav.ts` : points et routes de la zone d'un vol (`/dev/autorouter/nav?bbox=`)
+- `scripts/view-autorouter-tiles.ts` : visionneuse autonome (`node scripts/view-autorouter-tiles.ts`, port 5180)
+- `scripts/fetch-autorouter-tiles.ts` : préchargement limité d'une zone (`--bbox`, `--zooms`, `--max`)
+
 ## Structure
 
 - `scripts/build-data.ts` : conversion OurAirports → GeoJSON/JSON statiques
