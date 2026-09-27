@@ -3,6 +3,7 @@
 import { mkdir, readFile, rm, writeFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { buildAip } from './build-aip.ts';
+import { buildEaipEnr } from './build-eaip-enr.ts';
 
 const SOURCE = 'https://davidmegginson.github.io/ourairports-data';
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -90,7 +91,7 @@ async function main() {
   await mkdir(CACHE_DIR, { recursive: true });
   await mkdir(OUT_DIR, { recursive: true });
 
-  const [airports, runways, frequencies, navaids, aip] = await Promise.all([
+  const [airports, runways, frequencies, navaids, aip, enr] = await Promise.all([
     loadCsv('airports'),
     loadCsv('runways'),
     loadCsv('airport-frequencies'),
@@ -98,6 +99,10 @@ async function main() {
     buildAip().catch((err) => {
       console.warn(`⚠ eAIP indisponible (${err.message}) : routes, points et espaces aériens non générés`);
       return null;
+    }),
+    buildEaipEnr().catch((err) => {
+      console.warn(`⚠ eAIP européens indisponibles (${err.message}) : routes hors France non générées`);
+      return { airways: [], waypoints: [], countries: [] };
     }),
   ]);
   const ifrAerodromes = new Set(aip?.aerodromes ?? []);
@@ -238,21 +243,23 @@ async function main() {
   await writeFile(path.join(OUT_DIR, 'navaids.geojson'), collection(navaidFeatures));
   await writeFile(path.join(OUT_DIR, 'runways.geojson'), collection(runwayFeatures));
   await writeFile(path.join(OUT_DIR, 'runway-ends.geojson'), collection(runwayEndFeatures));
-  await writeFile(path.join(OUT_DIR, 'waypoints.geojson'), collection(aip?.waypoints ?? []));
-  await writeFile(path.join(OUT_DIR, 'airways.geojson'), collection(aip?.airways ?? []));
+  const waypointFeatures = [...(aip?.waypoints ?? []), ...enr.waypoints];
+  const airwayFeatures = [...(aip?.airways ?? []), ...enr.airways];
+  await writeFile(path.join(OUT_DIR, 'waypoints.geojson'), collection(waypointFeatures));
+  await writeFile(path.join(OUT_DIR, 'airways.geojson'), collection(airwayFeatures));
   await writeFile(path.join(OUT_DIR, 'airspaces.geojson'), collection(aip?.airspaces ?? []));
   await writeFile(
     path.join(OUT_DIR, 'meta.json'),
     JSON.stringify({
       generatedAt: new Date().toISOString(),
       airac: aip?.cycle ?? null,
-      sources: ['OurAirports (domaine public)', 'eAIP France, SIA'],
+      sources: ['OurAirports (domaine public)', 'eAIP France, SIA', ...enr.countries.map((c) => `eAIP ${c}`)],
     }),
   );
 
   console.log(
     `✓ ${features.length} aérodromes (${features.filter((f) => f.properties.ifr).length} IFR), ${navaidFeatures.length} balises, ` +
-      `${aip?.waypoints.length ?? 0} points, ${aip?.airways.length ?? 0} tronçons de routes, ` +
+      `${waypointFeatures.length} points, ${airwayFeatures.length} tronçons de routes, ` +
       `${aip?.airspaces.length ?? 0} espaces aériens → public/data`,
   );
 }

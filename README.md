@@ -6,7 +6,8 @@ données publiques.
 | Pays | Cartes officielles | Espaces, routes, points |
 | --- | --- | --- |
 | France | SIA : eAIP + atlas VAC | eAIP ENR 2.1, 3.2, 4.1, 4.4 |
-| Royaume-Uni, Finlande, Estonie, Islande | eAIP nationales (AD 2.24) | — |
+| Royaume-Uni, Estonie | eAIP nationales (AD 2.24) | Routes et points : eAIP ENR 3.1–3.3, 4.4 |
+| Finlande, Islande | eAIP nationales (AD 2.24) | — |
 | Autres pays d'Europe | — (aérodromes, pistes, fréquences, balises et plan au sol uniquement) | — |
 
 ## Démarrage
@@ -45,6 +46,7 @@ n'autorise ni CORS ni l'affichage en iframe.
 
 - `scripts/build-data.ts` : conversion OurAirports → GeoJSON/JSON statiques
 - `scripts/build-aip.ts` : extraction des balises, points, routes et espaces aériens de l'eAIP (champs AIXM du HTML)
+- `scripts/build-eaip-enr.ts` : routes et points des eAIP européens au format Eurocontrol (Royaume-Uni, Estonie)
 - `src/lib/mapStyle.ts`, `aeroIcons.ts`, `aeroLayers.ts` : fond de carte clair, symboles OACI et couches aéronautiques
 - `server/airac.ts` : calcul du cycle AIRAC
 - `server/charts.ts` : choix du fournisseur de cartes selon le préfixe OACI
