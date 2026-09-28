@@ -16,6 +16,7 @@ export type LayerGroup =
   | 'navaids'
   | 'airports'
   | 'ground'
+  | 'nat'
   | 'ivao';
 
 /** Routes autorouter : test local uniquement, servies par le serveur de dev Vite (voir vite.config.ts) */
@@ -36,6 +37,7 @@ export const LAYER_GROUP_LABELS: Partial<Record<LayerGroup, string>> = {
   navaids: 'Balises',
   airports: 'Aérodromes',
   ground: 'Plan au sol',
+  nat: 'Tracks NAT (Atlantique Nord)',
   ivao: 'Trafic IVAO (en direct)',
 };
 
@@ -58,12 +60,17 @@ export const LAYER_GROUPS: Record<LayerGroup, string[]> = {
   navaids: ['autorouter-vor-rose', 'navaids'],
   airports: ['runways', 'runway-ends', 'airports'],
   ground: ['ground-apron', 'ground-taxiway', 'ground-taxiway-centerline', 'ground-runway', 'ground-taxiway-labels', 'ground-holding', 'ground-stands'],
+  nat: ['nat-tracks', 'nat-track-labels', 'nat-fixes', 'nat-fix-labels', 'nat-track-ends'],
   ivao: ['ivao-atcs', 'ivao-pilots'],
 };
 
 /** Sources alimentées par le trafic IVAO (voir MapView) */
 export const IVAO_PILOTS_SOURCE = 'ivao-pilots';
 export const IVAO_ATCS_SOURCE = 'ivao-atcs';
+
+/** Source alimentée avec les tracks NAT en vigueur (voir MapView) */
+export const NAT_SOURCE = 'nat';
+const NAT_COLOR = '#0e7c86';
 
 /** Source alimentée à la demande avec le plan au sol des aérodromes visibles (voir MapView) */
 export const GROUND_SOURCE = 'ground';
@@ -112,6 +119,7 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
   map.addSource(GROUND_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addSource(IVAO_PILOTS_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addSource(IVAO_ATCS_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource(NAT_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
 
   const add = (layer: Parameters<MapLibreMap['addLayer']>[0]) => map.addLayer(layer, beforeId);
 
@@ -625,6 +633,85 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       'text-halo-color': HALO,
       'text-halo-width': 1.6,
     },
+  });
+
+  // Tracks NAT : en vigueur en trait plein, à venir en tirets, le track choisi plus épais ; points de report
+  // du track, et sa lettre à chaque extrémité
+  const natLine = filter(['==', ['geometry-type'], 'LineString']);
+  const natSelected = ['boolean', ['get', 'selected'], false];
+  add({
+    id: 'nat-tracks',
+    type: 'line',
+    source: NAT_SOURCE,
+    filter: natLine,
+    layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': expr(['case', natSelected, 1, 0]) },
+    paint: {
+      'line-color': NAT_COLOR,
+      'line-width': expr(['interpolate', ['linear'], ['zoom'], 2, ['case', natSelected, 3, 1.2], 6, ['case', natSelected, 4.5, 2.2]]),
+      'line-opacity': expr(['case', natSelected, 1, ['get', 'active'], 0.85, 0.5]),
+      'line-dasharray': expr(['case', ['get', 'active'], ['literal', [1, 0]], ['literal', [3, 2]]]),
+    },
+  });
+  add({
+    id: 'nat-track-labels',
+    type: 'symbol',
+    source: NAT_SOURCE,
+    filter: natLine,
+    minzoom: 3,
+    layout: {
+      'symbol-placement': 'line',
+      'symbol-spacing': 280,
+      'symbol-sort-key': expr(['case', natSelected, 0, 1]),
+      'text-field': expr(['case', ['get', 'active'], ['get', 'label'], ['concat', ['get', 'label'], '  (', ['get', 'validity'], ')']]),
+      'text-font': FONT_BOLD,
+      'text-size': 10,
+      'text-keep-upright': true,
+    },
+    paint: { 'text-color': NAT_COLOR, 'text-halo-color': HALO, 'text-halo-width': 2 },
+  });
+  add({
+    id: 'nat-fixes',
+    type: 'circle',
+    source: NAT_SOURCE,
+    filter: filter(['==', ['get', 'kind'], 'fix']),
+    minzoom: 3,
+    paint: {
+      'circle-radius': expr(['interpolate', ['linear'], ['zoom'], 3, ['case', natSelected, 3.5, 2.5], 7, ['case', natSelected, 5, 4]]),
+      'circle-color': '#ffffff',
+      'circle-stroke-color': NAT_COLOR,
+      'circle-stroke-width': 1.5,
+    },
+  });
+  // Nom ou coordonnées des points : ceux du track choisi toujours, les autres de plus près
+  add({
+    id: 'nat-fix-labels',
+    type: 'symbol',
+    source: NAT_SOURCE,
+    filter: filter(['all', ['==', ['geometry-type'], 'Point'], ['any', natSelected, ['>=', ['zoom'], 4.5]]]),
+    layout: {
+      'text-field': ['get', 'fix'],
+      'text-font': FONT_REGULAR,
+      'text-size': 9.5,
+      'text-offset': expr(['case', ['==', ['get', 'kind'], 'end'], ['literal', [0, 1.3]], ['literal', [0, 0.9]]]),
+      'text-anchor': 'top',
+      'text-optional': true,
+      'symbol-sort-key': expr(['case', natSelected, 0, 1]),
+    },
+    paint: { 'text-color': NAT_COLOR, 'text-halo-color': HALO, 'text-halo-width': 1.8 },
+  });
+  add({
+    id: 'nat-track-ends',
+    type: 'symbol',
+    source: NAT_SOURCE,
+    filter: filter(['==', ['get', 'kind'], 'end']),
+    layout: {
+      'text-field': ['get', 'letter'],
+      'text-font': FONT_BOLD,
+      'text-size': 12,
+      'text-allow-overlap': true,
+      'text-ignore-placement': true,
+    },
+    paint: { 'text-color': '#ffffff', 'text-halo-color': NAT_COLOR, 'text-halo-width': 4 },
   });
 
   // Trafic IVAO : contrôleurs (position de leur secteur) et avions orientés selon leur cap

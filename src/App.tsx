@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AirportPanel } from './components/AirportPanel.tsx';
 import { AirspacePanel } from './components/AirspacePanel.tsx';
 import { NavaidPanel } from './components/NavaidPanel.tsx';
+import { NatPanel } from './components/NatPanel.tsx';
 import { ChartViewer } from './components/ChartViewer.tsx';
 import { FlightPanel } from './components/FlightPanel.tsx';
 import { IconCharts, IconChevronLeft, IconLayers, IconPlane } from './components/icons.tsx';
@@ -13,6 +14,7 @@ import { RouteStrip } from './components/RouteStrip.tsx';
 import { SearchBox } from './components/SearchBox.tsx';
 import { fetchAutoGeoref, loadAirports, loadDetails, type AutoGeoref } from './lib/data.ts';
 import { usePins } from './lib/pins.ts';
+import { useNatTracks } from './lib/nat.ts';
 import { flightPlanText, trafficGeoJson, useIvaoPilot, useIvaoTraffic } from './lib/ivao.ts';
 import { editRoute, parseRoute, routeGeoJson, routeProgress, type FlightRoute, type RouteChange } from './lib/route.ts';
 import { fitTransform, pageCorners, useGeorefs, type ControlPoint, type LngLat, type PdfPoint } from './lib/georef.ts';
@@ -81,6 +83,7 @@ export function App() {
     setAirspace(a);
     if (a) {
       setNavaid(null);
+      setNatSelected(null);
       setDrawerOpen(true);
       setDrawerView('charts');
     }
@@ -88,6 +91,7 @@ export function App() {
   const showNavaid = useCallback((n: NavaidInfo) => {
     setNavaid(n);
     setAirspace(null);
+    setNatSelected(null);
     setDrawerOpen(true);
     setDrawerView('charts');
   }, []);
@@ -124,6 +128,19 @@ export function App() {
   // ───────── IVAO ─────────
 
   const traffic = useIvaoTraffic(layers.ivao);
+  // Track NAT choisi sur la carte, détaillé dans le panneau
+  const [natSelected, setNatSelected] = useState<string | null>(null);
+  const nat = useNatTracks(layers.nat, natSelected);
+  const natTrack = natSelected ? (nat.tracks.find((t) => t.id === natSelected) ?? null) : null;
+  const showNatTrack = useCallback((id: string | null) => {
+    setNatSelected(id);
+    if (id) {
+      setAirspace(null);
+      setNavaid(null);
+      setDrawerOpen(true);
+      setDrawerView('charts');
+    }
+  }, []);
   const [ivaoVid, setIvaoVid] = useState(() => readStored(IVAO_VID_KEY));
   const [follow, setFollow] = useState(false);
   const own = useIvaoPilot(ivaoVid || null);
@@ -221,6 +238,7 @@ export function App() {
     setCalib(null);
     setAirspace(null);
     setNavaid(null);
+    setNatSelected(null);
     setMapFocus(null);
     setSelectedIdent(ident);
     history.replaceState(null, '', ident ? `#${ident}` : location.pathname);
@@ -441,6 +459,8 @@ export function App() {
               onOpenChart={openChart}
               openChart={chart}
             />
+          ) : natTrack ? (
+            <NatPanel track={natTrack} onClose={() => setNatSelected(null)} />
           ) : airspace ? (
             <AirspacePanel airspace={airspace} onClose={() => setAirspace(null)} />
           ) : navaid ? (
@@ -485,6 +505,9 @@ export function App() {
             route={routeFeatures}
             focus={mapFocus}
             traffic={trafficFeatures}
+            nat={nat.geojson}
+            natSelected={natSelected}
+            onNatTrack={showNatTrack}
             ownAircraft={ownAircraft}
             ownTrail={trail?.points ?? NO_TRAIL}
             follow={follow}

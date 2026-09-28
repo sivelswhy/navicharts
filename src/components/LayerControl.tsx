@@ -17,6 +17,7 @@ const DEFAULTS: Record<LayerGroup, boolean> = {
   airports: true,
   ground: true,
   // Trafic IVAO : interroge le réseau toutes les 20 s, activé à la demande
+  nat: true,
   ivao: false,
 };
 

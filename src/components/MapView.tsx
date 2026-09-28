@@ -7,7 +7,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { loadAeroIcons } from '../lib/aeroIcons.ts';
 import type { NavaidInfo } from '../lib/navaid.ts';
-import { addAeroLayers, airspaceKey, GROUND_SOURCE, highlightAirspace, type AirspaceInfo, IVAO_ATCS_SOURCE, IVAO_PILOTS_SOURCE, setGroupVisibility, type LayerGroup } from '../lib/aeroLayers.ts';
+import { addAeroLayers, airspaceKey, GROUND_SOURCE, highlightAirspace, type AirspaceInfo, IVAO_ATCS_SOURCE, IVAO_PILOTS_SOURCE, NAT_SOURCE, setGroupVisibility, type LayerGroup } from '../lib/aeroLayers.ts';
 import type { LngLat } from '../lib/georef.ts';
 import { baseStyle, FONT_BOLD, FONT_REGULAR } from '../lib/mapStyle.ts';
 import type { Airport } from '../lib/types.ts';
@@ -68,6 +68,11 @@ interface Props {
   focus: { lngLat: LngLat; label?: string } | null;
   /** Trafic IVAO (avions et contrôleurs) */
   traffic: { pilots: FeatureCollection; atcs: FeatureCollection } | null;
+  /** Tracks NAT (lignes et points de report) */
+  nat: FeatureCollection;
+  /** Track NAT cliqué (null : clic hors des tracks alors qu'un track est choisi) */
+  onNatTrack: (id: string | null) => void;
+  natSelected: string | null;
   /** Avion suivi (vol IVAO de l'utilisateur) et trace déjà parcourue */
   ownAircraft: { lngLat: LngLat; heading: number; callsign: string } | null;
   ownTrail: LngLat[];
@@ -124,6 +129,9 @@ export function MapView({
   route,
   focus,
   traffic,
+  nat,
+  onNatTrack,
+  natSelected,
   ownAircraft,
   ownTrail,
   follow,
@@ -137,8 +145,8 @@ export function MapView({
   const [ready, setReady] = useState(false);
   const [bearing, setBearing] = useState(0);
   const [rotationControl] = useState(() => new PortalControl('rotation-control'));
-  const handlers = useRef({ onSelect, onPick, picking, airspace, onAirspace, onNavaid });
-  handlers.current = { onSelect, onPick, picking, airspace, onAirspace, onNavaid };
+  const handlers = useRef({ onSelect, onPick, picking, airspace, onAirspace, onNavaid, onNatTrack, natSelected });
+  handlers.current = { onSelect, onPick, picking, airspace, onAirspace, onNavaid, onNatTrack, natSelected };
 
   useEffect(() => {
     const m = new maplibregl.Map({
@@ -406,6 +414,30 @@ export function MapView({
       m.on('mouseleave', 'navaids', () => {
         if (!handlers.current.picking) m.getCanvas().style.cursor = '';
       });
+      // Tracks NAT : un clic sur un track ou l'un de ses points le détaille, un clic ailleurs le désélectionne
+      const NAT_CLICK_PX = 5;
+      const natLayers = ['nat-tracks', 'nat-track-ends', 'nat-fixes', 'nat-fix-labels'];
+      const natAt = (p: maplibregl.Point) =>
+        m.queryRenderedFeatures(
+          [
+            [p.x - NAT_CLICK_PX, p.y - NAT_CLICK_PX],
+            [p.x + NAT_CLICK_PX, p.y + NAT_CLICK_PX],
+          ],
+          { layers: natLayers },
+        )[0];
+      m.on('click', (e) => {
+        if (handlers.current.picking) return;
+        if (m.queryRenderedFeatures(e.point, { layers: ['navaids', 'airports'] }).length) return;
+        const id = natAt(e.point)?.properties.id as string | undefined;
+        if (id) handlers.current.onNatTrack(id);
+        else if (handlers.current.natSelected) handlers.current.onNatTrack(null);
+      });
+      m.on('mouseenter', natLayers, () => {
+        if (!handlers.current.picking) m.getCanvas().style.cursor = 'pointer';
+      });
+      m.on('mouseleave', natLayers, () => {
+        if (!handlers.current.picking) m.getCanvas().style.cursor = '';
+      });
       // Espaces aériens autorouter (dev) : un clic sur un nom ou une bordure met l'espace en évidence, un autre clic l'efface
       if (m.getLayer('autorouter-airspace-label')) {
         const AIRSPACE_CLICK_PX = 4;
@@ -413,7 +445,7 @@ export function MapView({
         m.on('click', (e) => {
           if (handlers.current.picking) return;
           // Clic sur une balise ou un aérodrome : c'est lui qui est choisi
-          if (m.queryRenderedFeatures(e.point, { layers: ['navaids', 'airports'] }).length) return;
+          if (m.queryRenderedFeatures(e.point, { layers: ['navaids', 'airports'] }).length || natAt(e.point)) return;
           const { x, y } = e.point;
           const box: [PointLike, PointLike] = [
             [x - AIRSPACE_CLICK_PX, y - AIRSPACE_CLICK_PX],
@@ -564,6 +596,13 @@ export function MapView({
     (m.getSource(IVAO_PILOTS_SOURCE) as GeoJSONSource).setData(traffic?.pilots ?? EMPTY);
     (m.getSource(IVAO_ATCS_SOURCE) as GeoJSONSource).setData(traffic?.atcs ?? EMPTY);
   }, [traffic, ready]);
+
+  // Tracks NAT
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    (m.getSource(NAT_SOURCE) as GeoJSONSource).setData(nat);
+  }, [nat, ready]);
 
   // Vol suivi, et recentrage continu si demandé
   useEffect(() => {

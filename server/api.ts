@@ -6,6 +6,7 @@ import { computeGeoref, type GeorefResult } from './georef.ts';
 import { getGround } from './ground.ts';
 import { getAtis, getPilot, getTraffic } from './ivao.ts';
 import { getMetars, getNearestMetar } from './metar.ts';
+import { getNatTracks } from './nat.ts';
 import { getNotams } from './notam.ts';
 import { getProcedures } from './procedures.ts';
 import { CHART_HOSTS, getCharts } from './charts.ts';
@@ -135,6 +136,16 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
     const notams = url.pathname.match(/^\/api\/notams\/([A-Z0-9]{4})$/);
     if (notams) {
       sendJson(res, 200, await getNotams(notams[1]));
+      return true;
+    }
+
+    // Tracks de l'Atlantique Nord (FAA NMS)
+    if (url.pathname === '/api/nat') {
+      try {
+        sendJson(res, 200, { tracks: await getNatTracks() });
+      } catch (err) {
+        sendJson(res, 503, { error: err instanceof Error ? err.message : 'Tracks NAT indisponibles' });
+      }
       return true;
     }
 

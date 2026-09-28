@@ -8,8 +8,8 @@ import { decodeTile, type Props } from './autorouter-mvt.ts';
 import { loadAutorouterTile } from './autorouter-tiles.ts';
 
 const ZOOM = 5;
-// De l'Islande à l'Oural, du Maghreb au cap Nord
-const TILES_X = [13, 20];
+// Du Canada atlantique (points d'entrée des tracks NAT) à l'Oural, du Maghreb au cap Nord
+const TILES_X = [9, 20];
 const TILES_Y = [7, 11];
 const LIMIT = 8;
 

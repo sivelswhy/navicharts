@@ -2049,3 +2049,30 @@ h3 {
 .facts .wide {
   grid-column: 1 / -1;
 }
+
+/* ───────── Track NAT ───────── */
+
+.nat-route-index {
+  width: 1.8em;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.nat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 16px;
+}
+
+.nat-remarks ol {
+  margin: 0 16px 8px;
+  padding-left: 20px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.nat-remarks li + li {
+  margin-top: 4px;
+}
