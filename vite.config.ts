@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { handleApi } from './server/api.ts';
@@ -67,6 +68,23 @@ const api: Plugin = {
   },
 };
 
+/** Commit de l'application compilée, comparé dans l'app au dernier commit publié sur GitHub */
+function gitVersion(): { commit: string; date: string; dirty: boolean } {
+  const git = (args: string) => execSync(`git ${args}`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  try {
+    return { commit: git('rev-parse HEAD'), date: git('log -1 --format=%cI'), dirty: git('status --porcelain') !== '' };
+  } catch {
+    // Pas de dépôt git (build sur une plateforme) : commit fourni par l'environnement s'il existe
+    return { commit: process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA ?? '', date: '', dirty: false };
+  }
+}
+const version = gitVersion();
+
 export default defineConfig({
   plugins: [react(), api],
+  define: {
+    __APP_COMMIT__: JSON.stringify(version.commit),
+    __APP_COMMIT_DATE__: JSON.stringify(version.date),
+    __APP_DIRTY__: JSON.stringify(version.dirty),
+  },
 });

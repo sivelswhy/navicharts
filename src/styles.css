@@ -235,6 +235,111 @@ h3 {
   color: var(--text);
 }
 
+/* Version de l'application, en bas du rail */
+.version {
+  position: relative;
+  margin-top: auto;
+}
+
+.version-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 52px;
+  padding: 6px 0;
+  border-radius: var(--radius);
+  color: var(--text-3);
+  font: 500 10px/1 var(--mono);
+}
+
+.version-button:hover,
+.version-button[aria-expanded='true'] {
+  background: var(--bluegray-600);
+  color: var(--text);
+}
+
+.version-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gray-400);
+}
+
+.current .version-dot {
+  background: #3fb950;
+}
+
+.outdated .version-dot {
+  background: #e3a008;
+}
+
+.unpublished .version-dot {
+  background: #58a6ff;
+}
+
+.version-popover {
+  position: absolute;
+  left: calc(100% + 10px);
+  bottom: 0;
+  width: 260px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--bg-400);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--bg-300);
+  color: var(--text-2);
+  font-size: 12.5px;
+  z-index: 20;
+}
+
+.version-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--text);
+  font-weight: 700;
+  font-size: 13.5px;
+}
+
+.version-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.version-facts dt {
+  color: var(--text-3);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.version-facts dd {
+  margin: 2px 0 0;
+}
+
+.version-facts a {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.version-date {
+  color: var(--text-3);
+}
+
+.version-message {
+  margin-top: 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.version-note {
+  margin: 10px 0 0;
+  color: var(--text-3);
+}
+
 /* Panneau latéral : se rabat contre le rail (largeur animée), la carte reprend la place libérée */
 .drawer {
   flex: none;

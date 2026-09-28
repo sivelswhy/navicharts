@@ -3,6 +3,7 @@ import { AirportPanel } from './components/AirportPanel.tsx';
 import { AirspacePanel } from './components/AirspacePanel.tsx';
 import { NavaidPanel } from './components/NavaidPanel.tsx';
 import { NatPanel } from './components/NatPanel.tsx';
+import { VersionBadge } from './components/VersionBadge.tsx';
 import { ChartViewer } from './components/ChartViewer.tsx';
 import { FlightPanel } from './components/FlightPanel.tsx';
 import { IconCharts, IconChevronLeft, IconLayers, IconPlane } from './components/icons.tsx';
@@ -410,6 +411,7 @@ export function App() {
           <IconPlane />
           <span>Vol</span>
         </button>
+        <VersionBadge />
       </nav>
 
       <aside className="drawer" inert={!drawerOpen}>
