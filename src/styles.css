@@ -316,6 +316,7 @@ h3 {
 }
 
 .version-facts dd {
+  min-width: 0;
   margin: 2px 0 0;
 }
 
@@ -330,9 +331,8 @@ h3 {
 
 .version-message {
   margin-top: 2px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  /* Message du commit en entier, sur plusieurs lignes si besoin */
+  overflow-wrap: anywhere;
 }
 
 .version-note {
