@@ -90,12 +90,31 @@ export function LayerControl({ layers, onToggle, onClose }: Props) {
             <img src={aeroIconUrl(icon)} alt="" width={16} height={16} /> {label}
           </li>
         ))}
-        <li>
-          <i className="swatch airspace" /> Espace contrôlé (classes A, C, D)
-        </li>
-        <li>
-          <i className="swatch airspace-e" /> Classe E, LTA
-        </li>
+        {import.meta.env.DEV ? (
+          <>
+            <li>
+              <i className="swatch airspace" /> CTR, TMA
+            </li>
+            <li>
+              <i className="swatch airspace-restricted" /> Zone réglementée (R) ou interdite (P)
+            </li>
+            <li>
+              <i className="swatch airspace-danger" /> Zone dangereuse (D)
+            </li>
+            <li>
+              <i className="swatch airspace-temporary" /> TRA, TSA
+            </li>
+          </>
+        ) : (
+          <>
+            <li>
+              <i className="swatch airspace" /> Espace contrôlé (classes A, C, D)
+            </li>
+            <li>
+              <i className="swatch airspace-e" /> Classe E, LTA
+            </li>
+          </>
+        )}
         <li>
           <i className="swatch airway" /> Route RNAV
         </li>

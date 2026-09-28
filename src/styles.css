@@ -1697,6 +1697,18 @@ h3 {
   border: 1.5px dashed #b46aa6;
 }
 
+.swatch.airspace-restricted {
+  box-shadow: inset 0 0 0 1.5px #c0392b;
+}
+
+.swatch.airspace-danger {
+  box-shadow: inset 0 0 0 1.5px #d17a22;
+}
+
+.swatch.airspace-temporary {
+  border: 1.5px dashed #8a5bb0;
+}
+
 .swatch.airway {
   background: linear-gradient(#f6f4ef 42%, #7ea4c6 42%, #7ea4c6 58%, #f6f4ef 58%);
 }

@@ -22,7 +22,7 @@ export type LayerGroup =
 const AUTOROUTER = import.meta.env.DEV;
 
 export const LAYER_GROUP_LABELS: Partial<Record<LayerGroup, string>> = {
-  airspaces: 'Espaces aériens (France)',
+  ...(!AUTOROUTER && { airspaces: 'Espaces aériens (France)' }),
   // Remplacées pour l'instant par les routes autorouter pendant les tests
   ...(!AUTOROUTER && { airways: 'Routes RNAV (France)' }),
   ...(AUTOROUTER && {
@@ -103,7 +103,6 @@ const AIRPORT_VISIBLE = filter([
 
 export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
   const data = (name: string) => `/data/${name}.geojson`;
-  map.addSource('airspaces', { type: 'geojson', data: data('airspaces') });
   map.addSource('airways', { type: 'geojson', data: data('airways') });
   map.addSource('waypoints', { type: 'geojson', data: data('waypoints') });
   map.addSource('navaids', { type: 'geojson', data: data('navaids') });
@@ -116,60 +115,63 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
 
   const add = (layer: Parameters<MapLibreMap['addLayer']>[0]) => map.addLayer(layer, beforeId);
 
-  // Espaces aériens
-  add({
-    id: 'airspace-fill',
-    type: 'fill',
-    source: 'airspaces',
-    // Les espaces se superposent : le remplissage n'apparaît qu'à l'échelle régionale pour ne pas voiler la carte
-    minzoom: 7,
-    filter: CONTROLLED,
-    // et s'efface à fort zoom, où l'on est souvent à l'intérieur de plusieurs parties d'une même TMA
-    paint: { 'fill-color': '#3b78c4', 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0, 8, 0.03, 10, 0.03, 11, 0] },
-  });
-  add({
-    id: 'airspace-fir',
-    type: 'line',
-    source: 'airspaces',
-    filter: filter(['==', ['get', 'type'], 'FIR']),
-    paint: { 'line-color': '#8f8a82', 'line-width': 1.6, 'line-dasharray': [6, 2, 1, 2] },
-  });
-  add({
-    id: 'airspace-line',
-    type: 'line',
-    source: 'airspaces',
-    minzoom: 5,
-    filter: CONTROLLED,
-    paint: { 'line-color': '#3b78c4', 'line-opacity': 0.75, 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.6, 10, 1.4] },
-  });
-  add({
-    id: 'airspace-line-e',
-    type: 'line',
-    source: 'airspaces',
-    minzoom: 6,
-    filter: CLASS_E,
-    paint: { 'line-color': '#b46aa6', 'line-opacity': 0.7, 'line-width': 1, 'line-dasharray': [3, 2] },
-  });
-  add({
-    id: 'airspace-label',
-    type: 'symbol',
-    source: 'airspaces',
-    minzoom: 8.5,
-    filter: filter(['in', ['get', 'type'], ['literal', ['CTA', 'TMA', 'CTR', 'LTA']]]),
-    layout: {
-      'symbol-placement': 'line',
-      'symbol-spacing': 400,
-      'text-field': expr(['concat', ['get', 'name'], '  ', ['coalesce', ['get', 'class'], ''], '  ', ['get', 'lower'], '–', ['get', 'upper']]),
-      'text-font': FONT_REGULAR,
-      'text-size': 9.5,
-      'text-offset': [0, 0.8],
-    },
-    paint: {
-      'text-color': expr(['case', ['==', ['get', 'class'], 'E'], '#9a4f8c', '#2f64a6']),
-      'text-halo-color': HALO,
-      'text-halo-width': 1.5,
-    },
-  });
+  // Espaces aériens (France), remplacés en dev par ceux d'autorouter (toute l'Europe)
+  if (!AUTOROUTER) {
+    map.addSource('airspaces', { type: 'geojson', data: data('airspaces') });
+    add({
+      id: 'airspace-fill',
+      type: 'fill',
+      source: 'airspaces',
+      // Les espaces se superposent : le remplissage n'apparaît qu'à l'échelle régionale pour ne pas voiler la carte
+      minzoom: 7,
+      filter: CONTROLLED,
+      // et s'efface à fort zoom, où l'on est souvent à l'intérieur de plusieurs parties d'une même TMA
+      paint: { 'fill-color': '#3b78c4', 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0, 8, 0.03, 10, 0.03, 11, 0] },
+    });
+    add({
+      id: 'airspace-fir',
+      type: 'line',
+      source: 'airspaces',
+      filter: filter(['==', ['get', 'type'], 'FIR']),
+      paint: { 'line-color': '#8f8a82', 'line-width': 1.6, 'line-dasharray': [6, 2, 1, 2] },
+    });
+    add({
+      id: 'airspace-line',
+      type: 'line',
+      source: 'airspaces',
+      minzoom: 5,
+      filter: CONTROLLED,
+      paint: { 'line-color': '#3b78c4', 'line-opacity': 0.75, 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.6, 10, 1.4] },
+    });
+    add({
+      id: 'airspace-line-e',
+      type: 'line',
+      source: 'airspaces',
+      minzoom: 6,
+      filter: CLASS_E,
+      paint: { 'line-color': '#b46aa6', 'line-opacity': 0.7, 'line-width': 1, 'line-dasharray': [3, 2] },
+    });
+    add({
+      id: 'airspace-label',
+      type: 'symbol',
+      source: 'airspaces',
+      minzoom: 8.5,
+      filter: filter(['in', ['get', 'type'], ['literal', ['CTA', 'TMA', 'CTR', 'LTA']]]),
+      layout: {
+        'symbol-placement': 'line',
+        'symbol-spacing': 400,
+        'text-field': expr(['concat', ['get', 'name'], '  ', ['coalesce', ['get', 'class'], ''], '  ', ['get', 'lower'], '–', ['get', 'upper']]),
+        'text-font': FONT_REGULAR,
+        'text-size': 9.5,
+        'text-offset': [0, 0.8],
+      },
+      paint: {
+        'text-color': expr(['case', ['==', ['get', 'class'], 'E'], '#9a4f8c', '#2f64a6']),
+        'text-halo-color': HALO,
+        'text-halo-width': 1.5,
+      },
+    });
+  }
 
   // Espaces aériens autorouter (test local) : toute l'Europe, dans la couche MVT `airspace`.
   // `object` distingue le contour (airspace), la bande intérieure (airspacefatborder) et l'étiquette (airspacelabel)
