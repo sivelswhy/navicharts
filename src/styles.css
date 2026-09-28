@@ -283,6 +283,8 @@ h3 {
 .map {
   position: absolute;
   inset: 0;
+  /* Espace autour du globe (zoom minimal) */
+  background: #0c1520;
 }
 
 /* ───────── Recherche ───────── */
@@ -339,7 +341,7 @@ h3 {
 
 .search-results li {
   display: grid;
-  grid-template-columns: 52px 1fr;
+  grid-template-columns: 58px 1fr;
   column-gap: 10px;
   padding: 7px 8px;
   border-radius: var(--radius-s);
@@ -1930,4 +1932,54 @@ h3 {
   .floating-panel {
     width: calc(100% - 24px);
   }
+}
+
+/* ───────── Espace aérien (test local autorouter) ───────── */
+
+.airspace-chip {
+  border: 1.5px solid;
+  background: transparent;
+}
+
+.airspace-limits {
+  display: flex;
+  flex-direction: column;
+  margin: 8px;
+  border-left: 3px solid var(--text-3);
+  border-radius: var(--radius);
+  background: var(--bg-400);
+}
+
+.airspace-limits > div {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.airspace-limits > div + div {
+  border-top: 1px dashed var(--text-3);
+}
+
+.airspace-limits-label {
+  color: var(--text-3);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.airspace-limits-value {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.airspace-limits-sub {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.facts .wide {
+  grid-column: 1 / -1;
 }

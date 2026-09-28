@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AirportPanel } from './components/AirportPanel.tsx';
+import { AirspacePanel } from './components/AirspacePanel.tsx';
+import { NavaidPanel } from './components/NavaidPanel.tsx';
 import { ChartViewer } from './components/ChartViewer.tsx';
 import { FlightPanel } from './components/FlightPanel.tsx';
 import { IconCharts, IconChevronLeft, IconLayers, IconPlane } from './components/icons.tsx';
@@ -16,6 +18,8 @@ import { editRoute, parseRoute, routeGeoJson, routeProgress, type FlightRoute, t
 import { fitTransform, pageCorners, useGeorefs, type ControlPoint, type LngLat, type PdfPoint } from './lib/georef.ts';
 import { renderOverlay, type OverlayImage, type OverlayStyle } from './lib/pdf.ts';
 import type { Airport, Chart } from './lib/types.ts';
+import type { AirspaceInfo } from './lib/aeroLayers.ts';
+import type { NavaidInfo } from './lib/navaid.ts';
 
 // L'aérodrome sélectionné est reflété dans l'URL (#LFPG) pour pouvoir le partager ou le retrouver.
 const identFromHash = () => decodeURIComponent(location.hash.slice(1)).toUpperCase();
@@ -69,6 +73,24 @@ export function App() {
   const { layers, toggle: toggleLayer } = useLayerVisibility();
   const [drawerOpen, setDrawerOpen] = useState(true);
   const [drawerView, setDrawerView] = useState<'charts' | 'flight'>('charts');
+  // Espace aérien autorouter mis en évidence sur la carte, détaillé dans le panneau (test local)
+  const [airspace, setAirspace] = useState<AirspaceInfo | null>(null);
+  // Balise choisie sur la carte ou dans la recherche, détaillée dans le panneau
+  const [navaid, setNavaid] = useState<NavaidInfo | null>(null);
+  const showAirspace = useCallback((a: AirspaceInfo | null) => {
+    setAirspace(a);
+    if (a) {
+      setNavaid(null);
+      setDrawerOpen(true);
+      setDrawerView('charts');
+    }
+  }, []);
+  const showNavaid = useCallback((n: NavaidInfo) => {
+    setNavaid(n);
+    setAirspace(null);
+    setDrawerOpen(true);
+    setDrawerView('charts');
+  }, []);
   const [layersOpen, setLayersOpen] = useState(false);
 
   // Plan de vol : dernière route saisie, mémorisée dans le navigateur
@@ -80,7 +102,7 @@ export function App() {
     }
   });
   const [flightRoute, setFlightRoute] = useState<FlightRoute | null>(null);
-  const [mapFocus, setMapFocus] = useState<{ lngLat: LngLat } | null>(null);
+  const [mapFocus, setMapFocus] = useState<{ lngLat: LngLat; label?: string } | null>(null);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const routeFeatures = useMemo(() => (flightRoute ? routeGeoJson(flightRoute) : null), [flightRoute]);
 
@@ -197,6 +219,9 @@ export function App() {
   const select = useCallback((ident: string) => {
     setChart(null);
     setCalib(null);
+    setAirspace(null);
+    setNavaid(null);
+    setMapFocus(null);
     setSelectedIdent(ident);
     history.replaceState(null, '', ident ? `#${ident}` : location.pathname);
   }, []);
@@ -372,7 +397,14 @@ export function App() {
       <aside className="drawer" inert={!drawerOpen}>
         <div className="drawer-inner">
           <div className="drawer-head">
-            <SearchBox airports={airports} onSelect={select} />
+            <SearchBox
+              airports={airports}
+              onSelect={select}
+              onSelectPoint={(p) => {
+                setMapFocus({ lngLat: p.lngLat, label: p.ident });
+                if (p.kind === 'navaid') showNavaid({ ident: p.ident, name: p.name, type: p.type, lngLat: p.lngLat });
+              }}
+            />
             <button className="icon-button" onClick={() => setDrawerOpen(false)} aria-label="Replier le panneau" title="Replier">
               <IconChevronLeft size={18} />
             </button>
@@ -409,6 +441,10 @@ export function App() {
               onOpenChart={openChart}
               openChart={chart}
             />
+          ) : airspace ? (
+            <AirspacePanel airspace={airspace} onClose={() => setAirspace(null)} />
+          ) : navaid ? (
+            <NavaidPanel navaid={navaid} onClose={() => setNavaid(null)} />
           ) : selected ? (
             <AirportPanel
               airport={selected}
@@ -452,6 +488,10 @@ export function App() {
             ownAircraft={ownAircraft}
             ownTrail={trail?.points ?? NO_TRAIL}
             follow={follow}
+            airspace={airspace}
+            onAirspace={showAirspace}
+            navaid={navaid}
+            onNavaid={showNavaid}
           />
           {flightRoute && (
             <RouteStrip

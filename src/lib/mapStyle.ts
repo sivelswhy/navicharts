@@ -26,6 +26,9 @@ const NAME = ['coalesce', ['get', 'name:fr'], ['get', 'name_int'], ['get', 'name
 export function baseStyle(): StyleSpecification {
   return {
     version: 8,
+    // Globe quand on dézoome au maximum, carte plane (Mercator) dès qu'on se rapproche
+    projection: { type: ['interpolate', ['linear'], ['zoom'], 2, 'vertical-perspective', 3.5, 'mercator'] },
+    sky: { 'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 3, 0] },
     glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
     sources: {
       openmaptiles: { type: 'vector', url: 'https://tiles.openfreemap.org/planet' },

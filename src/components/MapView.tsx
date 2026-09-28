@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as maplibregl from 'maplibre-gl';
-import type { GeoJSONSource, ImageSource, MapLayerMouseEvent } from 'maplibre-gl';
+import type { GeoJSONSource, ImageSource, MapLayerMouseEvent, PointLike } from 'maplibre-gl';
 import type { Feature, FeatureCollection, Point } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import { loadAeroIcons } from '../lib/aeroIcons.ts';
-import { addAeroLayers, GROUND_SOURCE, IVAO_ATCS_SOURCE, IVAO_PILOTS_SOURCE, setGroupVisibility, type LayerGroup } from '../lib/aeroLayers.ts';
+import type { NavaidInfo } from '../lib/navaid.ts';
+import { addAeroLayers, airspaceKey, GROUND_SOURCE, highlightAirspace, type AirspaceInfo, IVAO_ATCS_SOURCE, IVAO_PILOTS_SOURCE, setGroupVisibility, type LayerGroup } from '../lib/aeroLayers.ts';
 import type { LngLat } from '../lib/georef.ts';
 import { baseStyle, FONT_BOLD, FONT_REGULAR } from '../lib/mapStyle.ts';
 import type { Airport } from '../lib/types.ts';
@@ -63,8 +64,8 @@ interface Props {
   layers: Record<LayerGroup, boolean>;
   /** Trajet du plan de vol (segments et points) */
   route: FeatureCollection | null;
-  /** Point sur lequel centrer la carte (nouvel objet à chaque demande) */
-  focus: { lngLat: LngLat } | null;
+  /** Point sur lequel centrer la carte (nouvel objet à chaque demande), repéré sur la carte s'il a un nom */
+  focus: { lngLat: LngLat; label?: string } | null;
   /** Trafic IVAO (avions et contrôleurs) */
   traffic: { pilots: FeatureCollection; atcs: FeatureCollection } | null;
   /** Avion suivi (vol IVAO de l'utilisateur) et trace déjà parcourue */
@@ -72,6 +73,12 @@ interface Props {
   ownTrail: LngLat[];
   /** Garder la carte centrée sur l'avion suivi */
   follow: boolean;
+  /** Espace aérien autorouter mis en évidence (test local) */
+  airspace: AirspaceInfo | null;
+  onAirspace: (airspace: AirspaceInfo | null) => void;
+  /** Balise choisie (entourée sur la carte) */
+  navaid: NavaidInfo | null;
+  onNavaid: (navaid: NavaidInfo) => void;
 }
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] };
@@ -120,14 +127,18 @@ export function MapView({
   ownAircraft,
   ownTrail,
   follow,
+  airspace,
+  onAirspace,
+  navaid,
+  onNavaid,
 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
   const [bearing, setBearing] = useState(0);
   const [rotationControl] = useState(() => new PortalControl('rotation-control'));
-  const handlers = useRef({ onSelect, onPick, picking });
-  handlers.current = { onSelect, onPick, picking };
+  const handlers = useRef({ onSelect, onPick, picking, airspace, onAirspace, onNavaid });
+  handlers.current = { onSelect, onPick, picking, airspace, onAirspace, onNavaid };
 
   useEffect(() => {
     const m = new maplibregl.Map({
@@ -148,6 +159,8 @@ export function MapView({
       await loadAeroIcons(m);
       m.addSource('selected', { type: 'geojson', data: EMPTY });
       m.addSource('snap-points', { type: 'geojson', data: EMPTY });
+      m.addSource('focus-point', { type: 'geojson', data: EMPTY });
+      m.addSource('selected-navaid', { type: 'geojson', data: EMPTY });
       m.addSource('control-points', { type: 'geojson', data: EMPTY });
 
       addAeroLayers(m);
@@ -165,6 +178,46 @@ export function MapView({
         },
         'airports',
       );
+      m.addLayer(
+        {
+          id: 'selected-navaid',
+          type: 'circle',
+          source: 'selected-navaid',
+          paint: {
+            'circle-radius': 14,
+            'circle-color': 'rgba(29, 95, 168, 0.12)',
+            'circle-stroke-color': '#1d5fa8',
+            'circle-stroke-width': 2,
+          },
+        },
+        'navaids',
+      );
+      // Point ou balise choisi dans la recherche
+      m.addLayer({
+        id: 'focus-point',
+        type: 'circle',
+        source: 'focus-point',
+        paint: {
+          'circle-radius': 14,
+          'circle-color': 'rgba(13, 138, 130, 0.12)',
+          'circle-stroke-color': '#0d8a82',
+          'circle-stroke-width': 2,
+        },
+      });
+      m.addLayer({
+        id: 'focus-point-label',
+        type: 'symbol',
+        source: 'focus-point',
+        layout: {
+          'text-field': ['get', 'label'],
+          'text-font': FONT_BOLD,
+          'text-size': 12,
+          'text-offset': [0, -1.6],
+          'text-anchor': 'bottom',
+          'text-allow-overlap': true,
+        },
+        paint: { 'text-color': '#0d8a82', 'text-halo-color': '#fff', 'text-halo-width': 2 },
+      });
       // Repères d'aimantation (seuils de piste…) et points de calage déjà placés
       m.addLayer({
         id: 'snap-points',
@@ -335,6 +388,51 @@ export function MapView({
         const ident = e.features?.[0]?.properties?.ident;
         if (ident) handlers.current.onSelect(ident);
       });
+      m.on('click', 'navaids', (e: MapLayerMouseEvent) => {
+        const f = e.features?.[0];
+        if (handlers.current.picking || !f || f.geometry.type !== 'Point') return;
+        const p = f.properties;
+        handlers.current.onNavaid({
+          ident: String(p.ident),
+          name: p.name || undefined,
+          type: p.type || undefined,
+          frequency: p.frequency || undefined,
+          lngLat: f.geometry.coordinates as LngLat,
+        });
+      });
+      m.on('mouseenter', 'navaids', () => {
+        if (!handlers.current.picking) m.getCanvas().style.cursor = 'pointer';
+      });
+      m.on('mouseleave', 'navaids', () => {
+        if (!handlers.current.picking) m.getCanvas().style.cursor = '';
+      });
+      // Espaces aériens autorouter (dev) : un clic sur un nom ou une bordure met l'espace en évidence, un autre clic l'efface
+      if (m.getLayer('autorouter-airspace-label')) {
+        const AIRSPACE_CLICK_PX = 4;
+        const airspaceLayers = ['autorouter-airspace-label', 'autorouter-airspace-line', 'autorouter-airspace-band'];
+        m.on('click', (e) => {
+          if (handlers.current.picking) return;
+          // Clic sur une balise ou un aérodrome : c'est lui qui est choisi
+          if (m.queryRenderedFeatures(e.point, { layers: ['navaids', 'airports'] }).length) return;
+          const { x, y } = e.point;
+          const box: [PointLike, PointLike] = [
+            [x - AIRSPACE_CLICK_PX, y - AIRSPACE_CLICK_PX],
+            [x + AIRSPACE_CLICK_PX, y + AIRSPACE_CLICK_PX],
+          ];
+          // Le nom d'abord, puis la bordure la plus haute
+          const found = m.queryRenderedFeatures(box, { layers: airspaceLayers });
+          const p = (found.find((f) => f.layer.id === 'autorouter-airspace-label') ?? found[0])?.properties as AirspaceInfo | undefined;
+          const current = handlers.current.airspace;
+          if (!p && !current) return;
+          handlers.current.onAirspace(p && (!current || airspaceKey(p) !== airspaceKey(current)) ? { ...p } : null);
+        });
+        m.on('mouseenter', airspaceLayers, () => {
+          if (!handlers.current.picking) m.getCanvas().style.cursor = 'pointer';
+        });
+        m.on('mouseleave', airspaceLayers, () => {
+          if (!handlers.current.picking) m.getCanvas().style.cursor = '';
+        });
+      }
       // Plan au sol (OpenStreetMap) des aérodromes visibles, chargé à la demande et conservé
       const ground = new Map<string, Feature[]>();
       const requested = new Set<string>();
@@ -379,6 +477,19 @@ export function MapView({
       map.current = null;
     };
   }, []);
+
+  // Balise choisie
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    (m.getSource('selected-navaid') as GeoJSONSource).setData(navaid ? points([{ lngLat: navaid.lngLat, label: navaid.ident }]) : EMPTY);
+  }, [ready, navaid]);
+
+  // Espace aérien mis en évidence
+  useEffect(() => {
+    const m = map.current;
+    if (m && ready && m.getLayer('autorouter-airspace-highlight-fill')) highlightAirspace(m, airspace);
+  }, [ready, airspace]);
 
   // Aérodrome sélectionné
   useEffect(() => {
@@ -441,8 +552,9 @@ export function MapView({
 
   useEffect(() => {
     const m = map.current;
-    if (!m || !ready || !focus) return;
-    m.flyTo({ center: focus.lngLat, zoom: Math.max(m.getZoom(), 9), speed: 1.6 });
+    if (!m || !ready) return;
+    (m.getSource('focus-point') as GeoJSONSource).setData(focus?.label ? points([{ lngLat: focus.lngLat, label: focus.label }]) : EMPTY);
+    if (focus) m.flyTo({ center: focus.lngLat, zoom: Math.max(m.getZoom(), focus.label ? 10 : 9), speed: 1.6 });
   }, [focus, ready]);
 
   // Trafic IVAO

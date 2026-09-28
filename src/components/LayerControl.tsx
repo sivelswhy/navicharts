@@ -8,6 +8,7 @@ const DEFAULTS: Record<LayerGroup, boolean> = {
   airspaces: true,
   airways: true,
   autorouter: true,
+  autorouterAirspaces: true,
   autorouterSid: true,
   autorouterStar: true,
   autorouterPoints: true,

@@ -13,6 +13,9 @@ export const AERO_COLORS = {
   airwayUpper: '#7a4f9c',
   sid: '#1f7a4d',
   star: '#b4442c',
+  restricted: '#c0392b',
+  danger: '#d17a22',
+  temporary: '#8a5bb0',
 };
 
 const SIZE = 32; // dessinés en 2x (affichés en 16 px)
@@ -116,6 +119,46 @@ const LABEL_BOXES: Record<string, { fill: string; stroke: string }> = {
   'box-star': { fill: '#ffffff', stroke: '#b4442c' },
 };
 
+// Rose des vents d'un VOR, nord magnétique en haut (orientée ensuite selon la déclinaison de la station) :
+// graduations tous les 5°, caps tous les 30°, flèche vers le nord magnétique
+export const VOR_ROSE = 'vor-rose';
+const ROSE_SIZE = 512;
+function roseSvg(): string {
+  const c = ROSE_SIZE / 2;
+  const r = 200;
+  const color = AERO_COLORS.vor;
+  const polar = (deg: number, k: number) => {
+    const a = ((deg - 90) * Math.PI) / 180;
+    return [(c + k * Math.cos(a)).toFixed(1), (c + k * Math.sin(a)).toFixed(1)];
+  };
+  const ticks = Array.from({ length: 72 }, (_, i) => {
+    const deg = i * 5;
+    const len = deg % 30 === 0 ? 22 : deg % 10 === 0 ? 14 : 8;
+    const [x1, y1] = polar(deg, r);
+    const [x2, y2] = polar(deg, r - len);
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke-width="${deg % 30 === 0 ? 3 : 2}"/>`;
+  }).join('');
+  // Caps en dizaines de degrés (03, 06…), le nord remplacé par la flèche
+  const labels = Array.from({ length: 11 }, (_, i) => {
+    const deg = (i + 1) * 30;
+    const [x, y] = polar(deg, r - 42);
+    return `<text x="${x}" y="${y}" transform="rotate(${deg} ${x} ${y})">${String(deg / 10).padStart(2, '0')}</text>`;
+  }).join('');
+  const [tipX, tipY] = polar(0, r + 46);
+  const [baseY] = [(c - r + 4).toFixed(1)];
+  return svg(
+    `<g stroke="${color}" stroke-linecap="round" fill="none" opacity="0.85">` +
+      `<circle cx="${c}" cy="${c}" r="${r}" stroke-width="2.5"/>${ticks}</g>` +
+      `<g fill="${color}" opacity="0.85" font-family="Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="600" text-anchor="middle" dominant-baseline="central">${labels}</g>` +
+      // Flèche du nord magnétique, depuis le cercle vers l'extérieur
+      `<line x1="${c}" y1="${baseY}" x2="${c}" y2="${(c - r - 30).toFixed(1)}" stroke="${color}" stroke-width="4"/>` +
+      `<polygon points="${tipX},${tipY} ${c - 13},${c - r - 18} ${c + 13},${c - r - 18}" fill="${color}"/>` +
+      `<text x="${c}" y="${c - r + 42}" fill="${color}" font-family="Inter, Helvetica, Arial, sans-serif" font-size="24" font-weight="700" text-anchor="middle" dominant-baseline="central">N</text>`,
+    ROSE_SIZE,
+    ROSE_SIZE,
+  );
+}
+
 /** Type de balise (eAIP ou OurAirports) → nom d'icône */
 export const NAVAID_ICON = [
   'match',
@@ -144,6 +187,9 @@ async function loadSvg(markup: string, width: number, height: number): Promise<H
 
 export async function loadAeroIcons(map: MapLibreMap): Promise<void> {
   await Promise.all([
+    (async () => {
+      if (!map.hasImage(VOR_ROSE)) map.addImage(VOR_ROSE, await loadSvg(roseSvg(), ROSE_SIZE, ROSE_SIZE), { pixelRatio: 2 });
+    })(),
     ...(Object.keys(ICONS) as AeroIcon[]).map(async (name) => {
       if (!map.hasImage(name)) map.addImage(name, await loadSvg(ICONS[name], SIZE, SIZE), { pixelRatio: 2 });
     }),

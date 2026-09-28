@@ -93,7 +93,8 @@ const normalize = (s: string) =>
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
 
-export function searchAirports(airports: Airport[], query: string, limit = 8): Airport[] {
+/** Aérodromes correspondant à la recherche, avec leur pertinence (100 code exact, 60 début de code, 30 nom ou ville) */
+export function scoreAirports(airports: Airport[], query: string, limit = 8): { a: Airport; score: number }[] {
   const q = normalize(query.trim());
   if (!q) return [];
   const scored: { a: Airport; score: number }[] = [];
@@ -111,6 +112,5 @@ export function searchAirports(airports: Airport[], query: string, limit = 8): A
   }
   return scored
     .sort((x, y) => y.score - x.score || x.a.name.localeCompare(y.a.name))
-    .slice(0, limit)
-    .map((s) => s.a);
+    .slice(0, limit);
 }

@@ -1,13 +1,14 @@
 // Couches aéronautiques affichées par-dessus le fond de carte : espaces aériens, routes, points de report,
 // balises, pistes et aérodromes.
 import type { ExpressionSpecification, FilterSpecification, Map as MapLibreMap, SymbolLayerSpecification } from 'maplibre-gl';
-import { AERO_COLORS, NAVAID_ICON } from './aeroIcons.ts';
+import { AERO_COLORS, NAVAID_ICON, VOR_ROSE } from './aeroIcons.ts';
 import { FONT_BOLD, FONT_REGULAR } from './mapStyle.ts';
 
 export type LayerGroup =
   | 'airspaces'
   | 'airways'
   | 'autorouter'
+  | 'autorouterAirspaces'
   | 'autorouterSid'
   | 'autorouterStar'
   | 'autorouterPoints'
@@ -25,6 +26,7 @@ export const LAYER_GROUP_LABELS: Partial<Record<LayerGroup, string>> = {
   // Remplacées pour l'instant par les routes autorouter pendant les tests
   ...(!AUTOROUTER && { airways: 'Routes RNAV (France)' }),
   ...(AUTOROUTER && {
+    autorouterAirspaces: 'Espaces aériens autorouter (test local)',
     autorouter: 'Routes autorouter (test local)',
     autorouterSid: 'SID autorouter (test local)',
     autorouterStar: 'STAR autorouter (test local)',
@@ -40,12 +42,20 @@ export const LAYER_GROUP_LABELS: Partial<Record<LayerGroup, string>> = {
 export const LAYER_GROUPS: Record<LayerGroup, string[]> = {
   airspaces: ['airspace-fill', 'airspace-fir', 'airspace-line', 'airspace-line-e', 'airspace-label'],
   airways: ['airways', 'airway-labels'],
+  autorouterAirspaces: [
+    'autorouter-airspace-fill',
+    'autorouter-airspace-band',
+    'autorouter-airspace-line',
+    'autorouter-airspace-highlight-fill',
+    'autorouter-airspace-highlight-line',
+    'autorouter-airspace-label',
+  ],
   autorouter: ['autorouter-airways-casing', 'autorouter-airways', 'autorouter-airway-labels'],
   autorouterSid: ['autorouter-sid', 'autorouter-sid-labels'],
   autorouterStar: ['autorouter-star', 'autorouter-star-labels'],
   waypoints: ['waypoints'],
   autorouterPoints: ['autorouter-waypoints'],
-  navaids: ['navaids'],
+  navaids: ['autorouter-vor-rose', 'navaids'],
   airports: ['runways', 'runway-ends', 'airports'],
   ground: ['ground-apron', 'ground-taxiway', 'ground-taxiway-centerline', 'ground-runway', 'ground-taxiway-labels', 'ground-holding', 'ground-stands'],
   ivao: ['ivao-atcs', 'ivao-pilots'],
@@ -57,6 +67,21 @@ export const IVAO_ATCS_SOURCE = 'ivao-atcs';
 
 /** Source alimentée à la demande avec le plan au sol des aérodromes visibles (voir MapView) */
 export const GROUND_SOURCE = 'ground';
+
+/** Propriétés d'un espace aérien autorouter (ident, name, type, altlower, altupper…) */
+export type AirspaceInfo = Record<string, string | number | boolean>;
+
+/** Un espace est repéré par son identifiant et ses limites verticales (une TMA a plusieurs tranches) */
+export const airspaceKey = (a: AirspaceInfo) => `${a.ident}|${a.altlower}|${a.altupper}`;
+
+/** Espace aérien autorouter mis en évidence (clic sur son nom ou sa bordure) */
+export function highlightAirspace(map: MapLibreMap, airspace: AirspaceInfo | null) {
+  const f = airspace
+    ? filter(['all', ['==', ['get', 'object'], 'airspace'], ['==', ['get', 'ident'], airspace.ident], ['==', ['get', 'altlower'], airspace.altlower], ['==', ['get', 'altupper'], airspace.altupper]])
+    : filter(['==', ['get', 'object'], '']);
+  map.setFilter('autorouter-airspace-highlight-fill', f);
+  map.setFilter('autorouter-airspace-highlight-line', f);
+}
 
 const HALO = '#ffffff';
 const expr = (e: unknown) => e as ExpressionSpecification;
@@ -146,6 +171,104 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
     },
   });
 
+  // Espaces aériens autorouter (test local) : toute l'Europe, dans la couche MVT `airspace`.
+  // `object` distingue le contour (airspace), la bande intérieure (airspacefatborder) et l'étiquette (airspacelabel)
+  if (AUTOROUTER) {
+    map.addSource('autorouter-airspace', {
+      type: 'vector',
+      tiles: [`${location.origin}/dev/autorouter/airspace/{z}/{x}/{y}.mvt`],
+      // Pas de vues d'ensemble : assemblés, les polygones découpés feraient apparaître les bords des tuiles
+      minzoom: 5,
+      maxzoom: 10,
+      attribution: 'Espaces aériens © autorouter / EAD (test local)',
+    });
+    const src = { source: 'autorouter-airspace', 'source-layer': 'airspace' } as const;
+    const is = (object: string) => ['==', ['get', 'object'], object];
+    // Types autorouter : 13 CTR, 40 TMA, 15 zone D, 31 zone P, 35 zone R, 42 TRA, 43 TSA
+    const color = expr([
+      'match',
+      ['get', 'type'],
+      [13, 40],
+      '#3b78c4',
+      [31, 35],
+      AERO_COLORS.restricted,
+      15,
+      AERO_COLORS.danger,
+      [42, 43],
+      AERO_COLORS.temporary,
+      '#7d858f',
+    ]);
+    const controlled = ['in', ['get', 'type'], ['literal', [13, 40]]];
+    add({
+      id: 'autorouter-airspace-fill',
+      type: 'fill',
+      ...src,
+      minzoom: 7,
+      filter: filter(['all', is('airspace'), ['==', ['get', 'type'], 13]]),
+      paint: { 'fill-color': color, 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0, 8, 0.04, 11, 0.04, 12, 0] },
+    });
+    // Bande intérieure le long du contour, comme sur les cartes autorouter
+    add({
+      id: 'autorouter-airspace-band',
+      type: 'fill',
+      ...src,
+      minzoom: 8,
+      filter: filter(is('airspacefatborder')),
+      paint: { 'fill-color': color, 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 8, 0, 9, 0.18] },
+    });
+    add({
+      id: 'autorouter-airspace-line',
+      type: 'line',
+      ...src,
+      filter: filter(is('airspace')),
+      paint: {
+        'line-color': color,
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 8, 0.8],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.5, 10, 1.3],
+        'line-dasharray': expr(['case', ['in', ['get', 'type'], ['literal', [42, 43]]], ['literal', [4, 2]], ['literal', [1, 0]]]),
+      },
+    });
+    // Espace choisi en cliquant son nom (voir highlightAirspace) ; aucun au départ
+    add({
+      id: 'autorouter-airspace-highlight-fill',
+      type: 'fill',
+      ...src,
+      filter: filter(['==', ['get', 'object'], '']),
+      paint: { 'fill-color': color, 'fill-opacity': 0.14 },
+    });
+    add({
+      id: 'autorouter-airspace-highlight-line',
+      type: 'line',
+      ...src,
+      filter: filter(['==', ['get', 'object'], '']),
+      layout: { 'line-join': 'round' },
+      paint: { 'line-color': color, 'line-width': 2.5 },
+    });
+    add({
+      id: 'autorouter-airspace-label',
+      type: 'symbol',
+      ...src,
+      minzoom: 8.5,
+      filter: filter(is('airspacelabel')),
+      layout: {
+        'text-field': expr([
+          'format',
+          ['coalesce', ['get', 'ident'], ''],
+          {},
+          '\n',
+          {},
+          ['concat', ['coalesce', ['get', 'altlower'], '?'], ' – ', ['coalesce', ['get', 'altupper'], '?']],
+          { 'font-scale': 0.85, 'text-font': ['literal', FONT_REGULAR] },
+        ]),
+        'text-font': FONT_BOLD,
+        'text-size': 9.5,
+        'symbol-sort-key': expr(['case', controlled, 0, 1]),
+        'text-padding': 4,
+      },
+      paint: { 'text-color': color, 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+    });
+  }
+
   // Routes RNAV (masquées pendant les tests des routes autorouter ; route.ts charge ses propres données)
   if (!AUTOROUTER) {
     add({
@@ -177,8 +300,8 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       map.addSource(`autorouter-${kind}`, {
         type: 'vector',
         tiles: [`${location.origin}/dev/autorouter/${kind}/{z}/{x}/{y}.mvt`],
-        // autorouter fournit les routes dès le zoom 5 (tuiles vides en dessous)
-        minzoom: kind === 'airway' ? 5 : 6,
+        // autorouter fournit les tuiles dès le zoom 5 ; en dessous, vues d'ensemble assemblées par le serveur de dev
+        minzoom: 3,
         maxzoom: 10,
         attribution: 'Routes et procédures © autorouter (test local)',
       });
@@ -207,12 +330,12 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
         id: `autorouter-${kind}`,
         type: 'line',
         ...src(kind),
-        minzoom: 7.5,
+        minzoom: 6,
         layout: { 'line-join': 'round', 'line-cap': dash ? 'butt' : 'round' },
         paint: {
           'line-color': color,
-          'line-opacity': ['interpolate', ['linear'], ['zoom'], 7.5, 0.4, 9, 0.8],
-          'line-width': ['interpolate', ['linear'], ['zoom'], 7.5, 0.6, 11, 1.8],
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 6, 0.3, 9, 0.8],
+          'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.5, 11, 1.8],
           ...(dash && { 'line-dasharray': dash }),
         },
       });
@@ -253,12 +376,12 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       id: 'autorouter-airways',
       type: 'line',
       ...src('airway'),
-      minzoom: 5,
+      minzoom: 3,
       layout: { 'line-join': 'round', 'line-cap': 'round', 'line-sort-key': expr(['case', upper, 0, 1]) },
       paint: {
         'line-color': color,
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0.7, 8, 0.9],
-        'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.7, 7, 1, 11, 2.2],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 3, 0.45, 5, 0.7, 8, 0.9],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 3, 0.4, 5, 0.7, 7, 1, 11, 2.2],
       },
     });
     add({
@@ -292,22 +415,23 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
     map.addSource('autorouter-designatedpoint', {
       type: 'vector',
       tiles: [`${location.origin}/dev/autorouter/designatedpoint/{z}/{x}/{y}.mvt`],
-      minzoom: 6,
+      minzoom: 3,
       maxzoom: 10,
       attribution: 'Points © autorouter (test local)',
     });
-    // type 0 : points en route à 5 lettres ; les autres (points de procédure, radial/distance) plus tard
+    // Tous les points : type 0 (points en route à 5 lettres) mis en avant, les autres (points terminaux,
+    // points liés à une balise…) plus petits et plus discrets, leur nom à partir du zoom 10
     const enRoute = ['==', ['get', 'type'], 0];
     add({
       id: 'autorouter-waypoints',
       type: 'symbol',
       source: 'autorouter-designatedpoint',
       'source-layer': 'designatedpoint',
-      minzoom: 7,
-      filter: filter(['all', ['!=', ['get', 'ident'], ''], ['any', enRoute, ['>=', ['zoom'], 9]]]),
+      minzoom: 3,
+      filter: filter(['!=', ['get', 'ident'], '']),
       layout: {
         'icon-image': 'waypoint',
-        'icon-size': expr(['interpolate', ['linear'], ['zoom'], 7, ['case', enRoute, 0.5, 0.35], 11, ['case', enRoute, 0.8, 0.6]]),
+        'icon-size': expr(['interpolate', ['linear'], ['zoom'], 3, ['case', enRoute, 0.2, 0.15], 6, ['case', enRoute, 0.35, 0.3], 7, ['case', enRoute, 0.5, 0.35], 11, ['case', enRoute, 0.8, 0.6]]),
         'icon-allow-overlap': true,
         'symbol-sort-key': expr(['case', enRoute, 0, 1]),
         'text-field': expr(['step', ['zoom'], '', 8.5, ['case', enRoute, ['get', 'ident'], ''], 10, ['get', 'ident']]),
@@ -317,7 +441,12 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
         'text-anchor': 'top',
         'text-optional': true,
       },
-      paint: { 'text-color': AERO_COLORS.waypoint, 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+      paint: {
+        'icon-opacity': expr(['interpolate', ['linear'], ['zoom'], 3, ['case', enRoute, 1, 0.5], 9, ['case', enRoute, 1, 0.8]]),
+        'text-color': AERO_COLORS.waypoint,
+        'text-halo-color': HALO,
+        'text-halo-width': 1.5,
+      },
     });
   } else add({
     id: 'waypoints',
@@ -534,6 +663,36 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
     },
     paint: { 'text-color': '#1e3a8a', 'text-halo-color': HALO, 'text-halo-width': 1.8 },
   });
+
+  // Roses des VOR (test local) : autorouter donne la déclinaison de chaque station (`decl`, positive vers l'est),
+  // qui oriente la rose sur le nord magnétique. Taille fixe au sol (environ 0,5 NM de rayon)
+  if (AUTOROUTER) {
+    map.addSource('autorouter-navaid', {
+      type: 'vector',
+      tiles: [`${location.origin}/dev/autorouter/navaid/{z}/{x}/{y}.mvt`],
+      minzoom: 5,
+      maxzoom: 10,
+      attribution: 'Balises © autorouter (test local)',
+    });
+    add({
+      id: 'autorouter-vor-rose',
+      type: 'symbol',
+      source: 'autorouter-navaid',
+      'source-layer': 'navaid',
+      minzoom: 9.5,
+      filter: filter(['==', ['get', 'vor'], true]),
+      layout: {
+        'icon-image': VOR_ROSE,
+        'icon-size': ['interpolate', ['exponential', 2], ['zoom'], 7, 0.025, 12, 0.8],
+        'icon-rotate': expr(['coalesce', ['get', 'decl'], 0]),
+        'icon-rotation-alignment': 'map',
+        'icon-pitch-alignment': 'map',
+        'icon-allow-overlap': true,
+        'icon-ignore-placement': true,
+      },
+      paint: { 'icon-opacity': ['interpolate', ['linear'], ['zoom'], 9.5, 0, 10.5, 1] },
+    });
+  }
 
   // Balises (au-dessus du reste)
   add({
