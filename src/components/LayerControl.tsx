@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { aeroIconUrl, type AeroIcon } from '../lib/aeroIcons.ts';
 import { LAYER_GROUP_LABELS, type LayerGroup } from '../lib/aeroLayers.ts';
-import { IconClose } from './icons.tsx';
+import { IconChevronDown, IconClose } from './icons.tsx';
 
 const KEY = 'navicharts:layers';
 const DEFAULTS: Record<LayerGroup, boolean> = {
@@ -83,42 +83,48 @@ export function LayerControl({ layers, onToggle, onClose }: Props) {
           </li>
         ))}
       </ul>
-      <h3 className="list-heading">Légende</h3>
-      <ul className="legend">
-        {LEGEND.map(([icon, label]) => (
-          <li key={icon}>
-            <img src={aeroIconUrl(icon)} alt="" width={16} height={16} /> {label}
+      {/* Légende repliée par défaut, dépliée d'un clic */}
+      <details className="legend-toggle">
+        <summary className="list-heading">
+          <IconChevronDown size={14} className="legend-chevron" />
+          Légende
+        </summary>
+        <ul className="legend">
+          {LEGEND.map(([icon, label]) => (
+            <li key={icon}>
+              <img src={aeroIconUrl(icon)} alt="" width={16} height={16} /> {label}
+            </li>
+          ))}
+          {import.meta.env.DEV ? (
+            <>
+              <li>
+                <i className="swatch airspace" /> CTR, TMA
+              </li>
+              <li>
+                <i className="swatch airspace-restricted" /> Zone réglementée (R) ou interdite (P)
+              </li>
+              <li>
+                <i className="swatch airspace-danger" /> Zone dangereuse (D)
+              </li>
+              <li>
+                <i className="swatch airspace-temporary" /> TRA, TSA
+              </li>
+            </>
+          ) : (
+            <>
+              <li>
+                <i className="swatch airspace" /> Espace contrôlé (classes A, C, D)
+              </li>
+              <li>
+                <i className="swatch airspace-e" /> Classe E, LTA
+              </li>
+            </>
+          )}
+          <li>
+            <i className="swatch airway" /> Route RNAV
           </li>
-        ))}
-        {import.meta.env.DEV ? (
-          <>
-            <li>
-              <i className="swatch airspace" /> CTR, TMA
-            </li>
-            <li>
-              <i className="swatch airspace-restricted" /> Zone réglementée (R) ou interdite (P)
-            </li>
-            <li>
-              <i className="swatch airspace-danger" /> Zone dangereuse (D)
-            </li>
-            <li>
-              <i className="swatch airspace-temporary" /> TRA, TSA
-            </li>
-          </>
-        ) : (
-          <>
-            <li>
-              <i className="swatch airspace" /> Espace contrôlé (classes A, C, D)
-            </li>
-            <li>
-              <i className="swatch airspace-e" /> Classe E, LTA
-            </li>
-          </>
-        )}
-        <li>
-          <i className="swatch airway" /> Route RNAV
-        </li>
-      </ul>
+        </ul>
+      </details>
     </div>
   );
 }

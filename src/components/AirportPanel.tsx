@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { CATEGORY_LABELS, CHART_GROUPS, GROUP_LABELS, GROUP_OF, groupColor, type ChartGroup } from '../lib/chartGroups.ts';
 import { fetchCharts, fetchNotams, loadDetails, type Notam, type NotamResult } from '../lib/data.ts';
-import { useIvaoAtis, useMetars } from '../lib/metar.ts';
+import { useAirportMetar, useIvaoAtis } from '../lib/metar.ts';
 import type { Airport, AirportCharts, AirportDetails, Chart, ChartCategory } from '../lib/types.ts';
 import { IconClose, IconExternal, IconOverlay, IconPin } from './icons.tsx';
-import { AirportWeather, CATEGORY_LABEL } from './Weather.tsx';
+import { AirportWeather, CATEGORY_LABEL, formatNm } from './Weather.tsx';
 
 const TYPE_LABELS: Record<Airport['type'], string> = {
   large_airport: 'Grand aéroport',
@@ -66,7 +66,9 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
   const [details, setDetails] = useState<AirportDetails | null>(null);
   const [charts, setCharts] = useState<ChartsState>({ status: 'loading' });
   const [notams, setNotams] = useState<NotamResult | 'loading' | null>(null);
-  const metar = useMetars(airport.icao ? [airport.icao] : [])[airport.icao];
+  const weather = useAirportMetar(airport.icao || null, airport.lat, airport.lon);
+  const metar = weather.status === 'ok' ? weather.metar : undefined;
+  const nearby = weather.status === 'ok' ? weather.nearby : undefined;
   const atis = useIvaoAtis(airport.icao || null);
 
   useEffect(() => {
@@ -203,11 +205,16 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
     if (!details) return <p className="placeholder">Chargement…</p>;
     return (
       <div className="info">
-        {airport.icao && (
-          <div className="info-weather">
-            <AirportWeather icao={airport.icao} role="Météo" metar={metar} atis={atis} />
-          </div>
-        )}
+        <div className="info-weather">
+          <AirportWeather
+            icao={airport.icao || airport.ident}
+            role="Météo"
+            metar={metar}
+            atis={atis}
+            loading={weather.status === 'loading'}
+            nearby={nearby}
+          />
+        </div>
         <dl className="facts">
           <div>
             <dt>Type</dt>
@@ -296,7 +303,7 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
         </div>
         <div className="airport-name">{airport.name}</div>
         {airport.city && <div className="airport-city">{airport.city}</div>}
-        {(metar || atis) && (
+        {(weather.status !== 'none' || atis) && (
           // Résumé météo toujours visible ; le détail décodé est dans l'onglet INFO
           <button className="metar-strip" onClick={() => setTab('INFO')} title="Voir la météo décodée">
             {metar?.category && (
@@ -307,7 +314,14 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
                 ATIS {atis.letter}
               </span>
             )}
-            <span className="metar-strip-text">{metar ? metar.raw.replace(/^(METAR|SPECI)\s+/, '') : 'Pas de METAR'}</span>
+            {nearby && metar && (
+              <span className="metar-nearby-badge" title={`METAR de la station la plus proche${nearby.name ? ` : ${nearby.name}` : ''}`}>
+                {metar.icao} · {formatNm(nearby.distanceNm)}
+              </span>
+            )}
+            <span className="metar-strip-text">
+              {weather.status === 'loading' ? 'Chargement du METAR…' : metar ? metar.raw.replace(/^(METAR|SPECI)\s+/, '') : 'Pas de METAR'}
+            </span>
           </button>
         )}
       </header>
@@ -340,7 +354,7 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
           title="NOTAM"
         >
           NOTAM
-          {notamList.length > 0 && <span className="group-count">{notamList.length}</span>}
+          <span className="group-count">{notamList.length > 0 ? notamList.length : ''}</span>
         </button>
         <button
           role="tab"
@@ -351,6 +365,7 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
           title="Informations"
         >
           INFO
+          <span className="group-count" />
         </button>
       </nav>
 

@@ -5,7 +5,7 @@ import { currentCycle } from './airac.ts';
 import { computeGeoref, type GeorefResult } from './georef.ts';
 import { getGround } from './ground.ts';
 import { getAtis, getPilot, getTraffic } from './ivao.ts';
-import { getMetars } from './metar.ts';
+import { getMetars, getNearestMetar } from './metar.ts';
 import { getNotams } from './notam.ts';
 import { getProcedures } from './procedures.ts';
 import { CHART_HOSTS, getCharts } from './charts.ts';
@@ -135,6 +135,23 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
     const notams = url.pathname.match(/^\/api\/notams\/([A-Z0-9]{4})$/);
     if (notams) {
       sendJson(res, 200, await getNotams(notams[1]));
+      return true;
+    }
+
+    // METAR de la station la plus proche d'un point (aérodrome sans METAR)
+    if (url.pathname === '/api/metar/nearest') {
+      const lat = Number(url.searchParams.get('lat'));
+      const lon = Number(url.searchParams.get('lon'));
+      const exclude = url.searchParams.get('exclude') ?? undefined;
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+        sendJson(res, 400, { error: 'Position attendue' });
+        return true;
+      }
+      try {
+        sendJson(res, 200, { nearby: await getNearestMetar(lat, lon, exclude && /^[A-Z0-9]{4}$/.test(exclude) ? exclude : undefined) });
+      } catch (err) {
+        sendJson(res, 503, { error: err instanceof Error ? err.message : 'Météo indisponible' });
+      }
       return true;
     }
 

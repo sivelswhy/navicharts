@@ -47,6 +47,55 @@ export function useMetars(icaos: string[]): Record<string, Metar> {
   return metars;
 }
 
+/** METAR d'une autre station, faute de METAR pour l'aérodrome */
+export interface NearbyStation {
+  /** Nom de la station (NOAA) */
+  name: string | null;
+  /** Distance à l'aérodrome, en milles nautiques */
+  distanceNm: number;
+}
+
+export type AirportMetar =
+  | { status: 'loading' }
+  | { status: 'none' }
+  | { status: 'ok'; metar: Metar; nearby?: NearbyStation };
+
+/**
+ * METAR d'un aérodrome, rafraîchi toutes les 5 minutes ; sans METAR (ou sans indicatif OACI), celui de la station
+ * la plus proche, avec sa distance
+ */
+export function useAirportMetar(icao: string | null, lat: number, lon: number): AirportMetar {
+  const [state, setState] = useState<AirportMetar>({ status: 'loading' });
+  useEffect(() => {
+    setState({ status: 'loading' });
+    let cancelled = false;
+    const json = <T,>(url: string) => fetch(url).then((res) => (res.ok ? (res.json() as Promise<T>) : Promise.reject(new Error(`HTTP ${res.status}`))));
+    const load = async () => {
+      try {
+        if (icao) {
+          const { metars } = await json<{ metars: Metar[] }>(`/api/metar?ids=${icao}`);
+          if (metars[0]) return !cancelled && setState({ status: 'ok', metar: metars[0] });
+        }
+        const params = new URLSearchParams({ lat: String(lat), lon: String(lon) });
+        if (icao) params.set('exclude', icao);
+        const { nearby } = await json<{ nearby: (NearbyStation & { metar: Metar }) | null }>(`/api/metar/nearest?${params}`);
+        if (cancelled) return;
+        setState(nearby ? { status: 'ok', metar: nearby.metar, nearby: { name: nearby.name, distanceNm: nearby.distanceNm } } : { status: 'none' });
+      } catch {
+        // Service météo indisponible : on garde le dernier METAR affiché
+        if (!cancelled) setState((prev) => (prev.status === 'loading' ? { status: 'none' } : prev));
+      }
+    };
+    load();
+    const timer = setInterval(load, METAR_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [icao, lat, lon]);
+  return state;
+}
+
 /** ATIS diffusé sur IVAO pour l'aérodrome, s'il y a un contrôleur en ligne */
 export function useIvaoAtis(icao: string | null): IvaoAtis | null {
   const [atis, setAtis] = useState<IvaoAtis | null>(null);

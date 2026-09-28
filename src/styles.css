@@ -420,21 +420,25 @@ h3 {
 }
 
 .group-tabs {
-  display: flex;
-  gap: 2px;
-  padding: 0 10px;
+  /* Onglets de largeur égale, tous sur une ligne quelle que soit leur nombre ; compteur sous le libellé */
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  padding: 0 8px;
   border-bottom: 1px solid var(--line);
 }
 
 .group-tab {
   display: flex;
-  align-items: baseline;
+  flex-direction: column;
+  align-items: center;
   gap: 4px;
-  padding: 10px 6px 9px;
+  min-width: 0;
+  padding: 9px 2px 7px;
   border-bottom: 3px solid transparent;
   color: var(--text-3);
-  font: 700 12.5px/1 var(--font-title);
-  letter-spacing: 0.03em;
+  font: 700 11.5px/1 var(--font-title);
+  letter-spacing: 0.01em;
 }
 
 .group-tab:hover:not(:disabled) {
@@ -451,6 +455,8 @@ h3 {
 }
 
 .group-count {
+  /* Hauteur réservée même sans compteur (INFO), pour aligner les libellés */
+  min-height: 10.5px;
   font: 500 10.5px/1 var(--font);
   color: var(--text-3);
 }
@@ -1022,6 +1028,28 @@ h3 {
   background: #0f766e;
   color: #fff;
   font: 700 10.5px/1.3 var(--font);
+}
+
+/* METAR d'une station voisine (l'aérodrome n'en a pas) */
+.metar-nearby-badge {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--text-3);
+  border-radius: 4px;
+  color: var(--text-2);
+  font: 700 10.5px/1.3 var(--font);
+}
+
+.metar-nearby {
+  margin: 8px 0 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.metar-loading {
+  margin: 8px 0;
+  padding: 0;
 }
 
 .metar-strip-text {
@@ -1660,6 +1688,32 @@ h3 {
 
 .switch-row input:checked::after {
   transform: translateX(14px);
+}
+
+.legend-toggle summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.legend-toggle summary::-webkit-details-marker {
+  display: none;
+}
+
+.legend-toggle summary:hover {
+  color: var(--text-2);
+}
+
+.legend-chevron {
+  transform: rotate(-90deg);
+  transition: transform 0.15s ease;
+}
+
+.legend-toggle[open] .legend-chevron {
+  transform: none;
 }
 
 .legend {

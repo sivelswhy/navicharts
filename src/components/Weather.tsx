@@ -1,4 +1,4 @@
-import { ageOf, decodeMetar, useIvaoAtis, useMetars, type IvaoAtis, type Metar } from '../lib/metar.ts';
+import { ageOf, decodeMetar, useIvaoAtis, useMetars, type IvaoAtis, type Metar, type NearbyStation } from '../lib/metar.ts';
 
 export const CATEGORY_LABEL: Record<string, string> = {
   VFR: 'VFR',
@@ -8,7 +8,26 @@ export const CATEGORY_LABEL: Record<string, string> = {
 };
 
 /** Météo d'un aérodrome : METAR brut et décodé, puis ATIS IVAO si un contrôleur le diffuse */
-export function AirportWeather({ icao, role, metar, atis }: { icao: string; role: string; metar: Metar | undefined; atis: IvaoAtis | null }) {
+/** Distance en milles nautiques, à une décimale près en dessous de 10 NM */
+export const formatNm = (nm: number) => `${nm.toLocaleString('fr-FR', { maximumFractionDigits: nm < 10 ? 1 : 0 })} NM`;
+
+export function AirportWeather({
+  icao,
+  role,
+  metar,
+  atis,
+  loading = false,
+  nearby,
+}: {
+  icao: string;
+  role: string;
+  metar: Metar | undefined;
+  atis: IvaoAtis | null;
+  /** METAR en cours de chargement */
+  loading?: boolean;
+  /** Le METAR est celui d'une station voisine, faute de METAR pour l'aérodrome */
+  nearby?: NearbyStation;
+}) {
   return (
     <article className="weather">
       <header className="weather-head">
@@ -21,8 +40,16 @@ export function AirportWeather({ icao, role, metar, atis }: { icao: string; role
         )}
         {metar && <span className="weather-age">{ageOf(metar.observed)}</span>}
       </header>
-      {metar ? (
+      {loading ? (
+        <p className="placeholder metar-loading">Chargement du METAR…</p>
+      ) : metar ? (
         <>
+          {nearby && (
+            <p className="metar-nearby">
+              Pas de METAR pour cet aérodrome : METAR de <strong>{metar.icao}</strong>
+              {nearby.name ? ` (${nearby.name})` : ''}, à {formatNm(nearby.distanceNm)}.
+            </p>
+          )}
           <p className="metar-raw">{metar.raw}</p>
           <dl className="metar-decoded">
             {decodeMetar(metar.raw).map((line) => (
@@ -34,7 +61,7 @@ export function AirportWeather({ icao, role, metar, atis }: { icao: string; role
           </dl>
         </>
       ) : (
-        <p className="placeholder">Pas de METAR disponible pour cet aérodrome.</p>
+        <p className="placeholder">Pas de METAR disponible pour cet aérodrome ni à proximité.</p>
       )}
       {atis && (
         <div className="atis">
