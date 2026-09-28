@@ -1,6 +1,6 @@
 // Couches aéronautiques affichées par-dessus le fond de carte : espaces aériens, routes, points de report,
 // balises, pistes et aérodromes.
-import type { ExpressionSpecification, FilterSpecification, Map as MapLibreMap, SymbolLayerSpecification } from 'maplibre-gl';
+import type { ExpressionSpecification, FilterSpecification, LineLayerSpecification, Map as MapLibreMap, SymbolLayerSpecification } from 'maplibre-gl';
 import { AERO_COLORS, NAVAID_ICON, VOR_ROSE } from './aeroIcons.ts';
 import { FONT_BOLD, FONT_REGULAR } from './mapStyle.ts';
 
@@ -53,8 +53,8 @@ export const LAYER_GROUPS: Record<LayerGroup, string[]> = {
     'autorouter-airspace-label',
   ],
   autorouter: ['autorouter-airways-casing', 'autorouter-airways', 'autorouter-airway-labels'],
-  autorouterSid: ['autorouter-sid', 'autorouter-sid-labels'],
-  autorouterStar: ['autorouter-star', 'autorouter-star-labels'],
+  autorouterSid: ['autorouter-sid-band', 'autorouter-sid', 'autorouter-sid-labels'],
+  autorouterStar: ['autorouter-star-band', 'autorouter-star', 'autorouter-star-labels'],
   waypoints: ['waypoints'],
   autorouterPoints: ['autorouter-waypoints'],
   navaids: ['autorouter-vor-rose', 'navaids'],
@@ -91,6 +91,39 @@ export function highlightAirspace(map: MapLibreMap, airspace: AirspaceInfo | nul
 }
 
 const HALO = '#ffffff';
+
+/**
+ * Tracé d'une SID ou d'une STAR, identique partout (carte, fiche d'aérodrome, vol) : une bande translucide
+ * bordée de deux traits opaques, comme la bande des espaces aériens. Deux couches : `${id}-band` puis `${id}`.
+ */
+export function procedureBandLayers(
+  id: string,
+  base: Pick<LineLayerSpecification, 'source' | 'source-layer' | 'filter' | 'minzoom'>,
+  color: ExpressionSpecification | string,
+  /** Opacité d'ensemble : fixe, ou paliers [zoom, opacité] */
+  opacity: number | [number, number][] = 1,
+): LineLayerSpecification[] {
+  const width: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 7, 6, 10, 10, 13, 16];
+  // MapLibre n'admet « zoom » qu'au premier niveau d'une interpolation : les paliers sont multipliés un à un
+  const scaled = (k: number): ExpressionSpecification | number =>
+    typeof opacity === 'number' ? opacity * k : ['interpolate', ['linear'], ['zoom'], ...opacity.flatMap(([z, o]) => [z, o * k])];
+  return [
+    {
+      ...base,
+      id: `${id}-band`,
+      type: 'line',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': color, 'line-width': width, 'line-opacity': scaled(0.22) },
+    } as LineLayerSpecification,
+    {
+      ...base,
+      id,
+      type: 'line',
+      layout: { 'line-join': 'round' },
+      paint: { 'line-color': color, 'line-width': 1.6, 'line-gap-width': width, 'line-opacity': scaled(1) },
+    } as LineLayerSpecification,
+  ];
+}
 const expr = (e: unknown) => e as ExpressionSpecification;
 const filter = (e: unknown) => e as FilterSpecification;
 
@@ -334,21 +367,13 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       'text-font': FONT_BOLD,
     };
 
-    // SID en vert, STAR en rouge brique et en tirets, sous les routes
-    const procedure = (kind: 'sid' | 'star', color: string, dash?: number[]) => {
-      add({
-        id: `autorouter-${kind}`,
-        type: 'line',
-        ...src(kind),
-        minzoom: 6,
-        layout: { 'line-join': 'round', 'line-cap': dash ? 'butt' : 'round' },
-        paint: {
-          'line-color': color,
-          'line-opacity': ['interpolate', ['linear'], ['zoom'], 6, 0.3, 9, 0.8],
-          'line-width': ['interpolate', ['linear'], ['zoom'], 6, 0.5, 11, 1.8],
-          ...(dash && { 'line-dasharray': dash }),
-        },
-      });
+    // SID en vert, STAR en rouge brique, sous les routes (même tracé en bande que partout ailleurs)
+    const procedure = (kind: 'sid' | 'star', color: string) => {
+      for (const layer of procedureBandLayers(`autorouter-${kind}`, { ...src(kind), minzoom: 6 }, color, [
+        [6, 0.35],
+        [9, 0.9],
+      ]))
+        add(layer);
       add({
         id: `autorouter-${kind}-labels`,
         type: 'symbol',
@@ -368,7 +393,7 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       });
     };
     procedure('sid', AERO_COLORS.sid);
-    procedure('star', AERO_COLORS.star, [3, 1.5]);
+    procedure('star', AERO_COLORS.star);
 
     // Routes : inférieures en bleu, supérieures en violet, comme sur les cartes en route.
     // Supérieure : plancher au FL 195 ou plus (altlower vaut « F245 », « GND »…), ou désignation en U

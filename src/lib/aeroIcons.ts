@@ -13,6 +13,7 @@ export const AERO_COLORS = {
   airwayUpper: '#7a4f9c',
   sid: '#1f7a4d',
   star: '#b4442c',
+  approach: '#2d5fc4',
   restricted: '#c0392b',
   danger: '#d17a22',
   temporary: '#8a5bb0',

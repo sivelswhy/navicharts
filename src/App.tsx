@@ -21,6 +21,7 @@ import { editRoute, parseRoute, routeGeoJson, routeProgress, type FlightRoute, t
 import { fitTransform, pageCorners, useGeorefs, type ControlPoint, type LngLat, type PdfPoint } from './lib/georef.ts';
 import { renderOverlay, type OverlayImage, type OverlayStyle } from './lib/pdf.ts';
 import type { Airport, Chart } from './lib/types.ts';
+import type { FeatureCollection } from 'geojson';
 import type { AirspaceInfo } from './lib/aeroLayers.ts';
 import type { NavaidInfo } from './lib/navaid.ts';
 
@@ -108,6 +109,8 @@ export function App() {
   });
   const [flightRoute, setFlightRoute] = useState<FlightRoute | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lngLat: LngLat; label?: string } | null>(null);
+  // SID et STAR choisies dans la fiche de l'aérodrome, tracées sur la carte
+  const [procedureFeatures, setProcedureFeatures] = useState<FeatureCollection | null>(null);
   const [routeStatus, setRouteStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const routeFeatures = useMemo(() => (flightRoute ? routeGeoJson(flightRoute) : null), [flightRoute]);
 
@@ -477,6 +480,7 @@ export function App() {
               isOverlaid={(id) => overlayChart?.id === id}
               hasGeoref={(id) => Boolean(georefs[id] || autoOf(id))}
               onClose={() => select('')}
+              onShowProcedures={setProcedureFeatures}
             />
           ) : (
             <div className="welcome">
@@ -508,6 +512,7 @@ export function App() {
             focus={mapFocus}
             traffic={trafficFeatures}
             nat={nat.geojson}
+            procedures={procedureFeatures}
             natSelected={natSelected}
             onNatTrack={showNatTrack}
             ownAircraft={ownAircraft}

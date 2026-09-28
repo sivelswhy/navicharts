@@ -5,9 +5,9 @@ import type { GeoJSONSource, ImageSource, MapLayerMouseEvent, PointLike } from '
 import type { Feature, FeatureCollection, Point } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
-import { loadAeroIcons } from '../lib/aeroIcons.ts';
+import { AERO_COLORS, loadAeroIcons } from '../lib/aeroIcons.ts';
 import type { NavaidInfo } from '../lib/navaid.ts';
-import { addAeroLayers, airspaceKey, GROUND_SOURCE, highlightAirspace, type AirspaceInfo, IVAO_ATCS_SOURCE, IVAO_PILOTS_SOURCE, NAT_SOURCE, setGroupVisibility, type LayerGroup } from '../lib/aeroLayers.ts';
+import { addAeroLayers, airspaceKey, procedureBandLayers, GROUND_SOURCE, highlightAirspace, type AirspaceInfo, IVAO_ATCS_SOURCE, IVAO_PILOTS_SOURCE, NAT_SOURCE, setGroupVisibility, type LayerGroup } from '../lib/aeroLayers.ts';
 import type { LngLat } from '../lib/georef.ts';
 import { baseStyle, FONT_BOLD, FONT_REGULAR } from '../lib/mapStyle.ts';
 import type { Airport } from '../lib/types.ts';
@@ -68,6 +68,8 @@ interface Props {
   focus: { lngLat: LngLat; label?: string } | null;
   /** Trafic IVAO (avions et contrôleurs) */
   traffic: { pilots: FeatureCollection; atcs: FeatureCollection } | null;
+  /** SID et STAR choisies dans la fiche de l'aérodrome */
+  procedures: FeatureCollection | null;
   /** Tracks NAT (lignes et points de report) */
   nat: FeatureCollection;
   /** Track NAT cliqué (null : clic hors des tracks alors qu'un track est choisi) */
@@ -105,8 +107,9 @@ function boundsOf(coords: LngLat[]): maplibregl.LngLatBounds {
 
 // Couleurs du trajet par phase de vol (reprises dans styles.css : --route, --sid, --star)
 const ROUTE_COLOR = '#c2188f';
-const SID_COLOR = '#e8590c';
-const STAR_COLOR = '#2b9348';
+// SID et STAR : mêmes couleurs que sur la carte et dans la fiche d'aérodrome
+const SID_COLOR = AERO_COLORS.sid;
+const STAR_COLOR = AERO_COLORS.star;
 const PHASE_COLOR: maplibregl.ExpressionSpecification = [
   'match',
   ['get', 'phase'],
@@ -130,6 +133,7 @@ export function MapView({
   focus,
   traffic,
   nat,
+  procedures,
   onNatTrack,
   natSelected,
   ownAircraft,
@@ -260,14 +264,78 @@ export function MapView({
         paint: { 'text-color': '#fff' },
       });
 
+      // SID et STAR choisies dans la fiche de l'aérodrome, sous le trajet du plan de vol
+      m.addSource('procedures', { type: 'geojson', data: EMPTY });
+      const procedureColor: maplibregl.ExpressionSpecification = [
+        'match',
+        ['get', 'type'],
+        'SID',
+        AERO_COLORS.sid,
+        'STAR',
+        AERO_COLORS.star,
+        AERO_COLORS.approach,
+      ];
+      const isProcedureLine: maplibregl.ExpressionSpecification = ['==', ['geometry-type'], 'LineString'];
+      const isMissed: maplibregl.ExpressionSpecification = ['==', ['get', 'kind'], 'missed'];
+      for (const layer of procedureBandLayers('procedure-lines', { source: 'procedures', filter: ['all', isProcedureLine, ['!', isMissed]] }, procedureColor)) {
+        m.addLayer(layer);
+      }
+      // Approche interrompue : trait fin en tirets, pour la distinguer de l'approche
+      m.addLayer({
+        id: 'procedure-missed',
+        type: 'line',
+        source: 'procedures',
+        filter: ['all', isProcedureLine, isMissed],
+        paint: { 'line-color': procedureColor, 'line-width': 2, 'line-dasharray': [3, 2], 'line-opacity': 0.9 },
+      });
+      m.addLayer({
+        id: 'procedure-names',
+        type: 'symbol',
+        source: 'procedures',
+        filter: ['==', ['geometry-type'], 'LineString'],
+        layout: {
+          'symbol-placement': 'line',
+          'symbol-spacing': 250,
+          'text-field': ['get', 'ident'],
+          'text-font': FONT_BOLD,
+          'text-size': 10.5,
+          'text-keep-upright': true,
+          'text-offset': [0, -0.8],
+        },
+        paint: { 'text-color': procedureColor, 'text-halo-color': '#fff', 'text-halo-width': 2 },
+      });
+      m.addLayer({
+        id: 'procedure-fixes',
+        type: 'circle',
+        source: 'procedures',
+        filter: ['==', ['geometry-type'], 'Point'],
+        paint: { 'circle-radius': 3.5, 'circle-color': '#fff', 'circle-stroke-color': procedureColor, 'circle-stroke-width': 2 },
+      });
+      m.addLayer({
+        id: 'procedure-fix-labels',
+        type: 'symbol',
+        source: 'procedures',
+        filter: ['==', ['geometry-type'], 'Point'],
+        layout: {
+          'text-field': ['get', 'fix'],
+          'text-font': FONT_BOLD,
+          'text-size': 10,
+          'text-anchor': 'top',
+          'text-offset': [0, 0.7],
+          'text-optional': true,
+        },
+        paint: { 'text-color': procedureColor, 'text-halo-color': '#fff', 'text-halo-width': 1.8 },
+      });
+
       // Trajet du plan de vol, au-dessus des couches aéronautiques et des cartes superposées
       m.addSource('route', { type: 'geojson', data: EMPTY });
       const isLine: maplibregl.ExpressionSpecification = ['==', ['geometry-type'], 'LineString'];
+      const isProcedure: maplibregl.ExpressionSpecification = ['==', ['get', 'style'], 'procedure'];
       m.addLayer({
         id: 'route-casing',
         type: 'line',
         source: 'route',
-        filter: isLine,
+        filter: ['all', isLine, ['!', isProcedure]],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.9 },
       });
@@ -275,10 +343,14 @@ export function MapView({
         id: 'route-line',
         type: 'line',
         source: 'route',
-        filter: ['all', isLine, ['!=', ['get', 'style'], 'approximate']],
+        filter: ['all', isLine, ['==', ['get', 'style'], 'route']],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': PHASE_COLOR, 'line-width': 3 },
       });
+      // Branches de SID et de STAR : tracé en bande, comme partout ailleurs
+      for (const layer of procedureBandLayers('route-sid-star', { source: 'route', filter: ['all', isLine, isProcedure] }, PHASE_COLOR)) {
+        m.addLayer(layer);
+      }
       // Segments approximatifs (procédure non publiée dans nos données, fin d'approche) : en tirets
       m.addLayer({
         id: 'route-procedure',
@@ -596,6 +668,17 @@ export function MapView({
     (m.getSource(IVAO_PILOTS_SOURCE) as GeoJSONSource).setData(traffic?.pilots ?? EMPTY);
     (m.getSource(IVAO_ATCS_SOURCE) as GeoJSONSource).setData(traffic?.atcs ?? EMPTY);
   }, [traffic, ready]);
+
+  // SID et STAR choisies : l'aérodrome et ses procédures cadrés à la première sélection
+  const proceduresShown = useRef(false);
+  useEffect(() => {
+    const m = map.current;
+    if (!m || !ready) return;
+    (m.getSource('procedures') as GeoJSONSource).setData(procedures ?? EMPTY);
+    const coords = (procedures?.features ?? []).flatMap((f) => (f.geometry.type === 'LineString' ? (f.geometry.coordinates as LngLat[]) : []));
+    if (coords.length && !proceduresShown.current) m.fitBounds(boundsOf(coords), { padding: 80, maxZoom: 11, duration: 800, bearing: m.getBearing() });
+    proceduresShown.current = coords.length > 0;
+  }, [procedures, ready]);
 
   // Tracks NAT
   useEffect(() => {

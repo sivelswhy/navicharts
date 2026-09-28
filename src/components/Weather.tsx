@@ -94,7 +94,6 @@ export function WeatherSection({ departure, arrival }: { departure: string | nul
       <h3 className="list-heading">Météo</h3>
       {departure && <TerminalWeather icao={departure} role="Départ" metar={metars[departure]} />}
       {arrival && arrival !== departure && <TerminalWeather icao={arrival} role="Arrivée" metar={metars[arrival]} />}
-      <p className="footnote">METAR : NOAA (aviationweather.gov). ATIS : réseau IVAO, quand un contrôleur de l’aérodrome est en ligne.</p>
     </section>
   );
 }

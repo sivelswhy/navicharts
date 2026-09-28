@@ -4,6 +4,15 @@ import { fetchCharts, fetchNotams, loadDetails, type Notam, type NotamResult } f
 import { useAirportMetar, useIvaoAtis } from '../lib/metar.ts';
 import type { Airport, AirportCharts, AirportDetails, Chart, ChartCategory } from '../lib/types.ts';
 import { IconClose, IconExternal, IconOverlay, IconPin } from './icons.tsx';
+import { ProcedurePicker, type PickerItem } from './ProcedurePicker.tsx';
+import {
+  approachKey,
+  loadPlacedProcedures,
+  procedureKey,
+  proceduresGeoJson,
+  type AirportProcedureSet,
+} from '../lib/procedures.ts';
+import type { FeatureCollection } from 'geojson';
 import { AirportWeather, CATEGORY_LABEL, formatNm } from './Weather.tsx';
 
 const TYPE_LABELS: Record<Airport['type'], string> = {
@@ -57,11 +66,13 @@ interface Props {
   /** Carte déjà calée (superposable) */
   hasGeoref: (id: string) => boolean;
   onClose: () => void;
+  /** SID et STAR choisies, à tracer sur la carte (null : aucune) */
+  onShowProcedures: (features: FeatureCollection | null) => void;
 }
 
 type ChartsState = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ok'; data: AirportCharts };
 
-export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogglePin, isOverlaid, hasGeoref, onClose }: Props) {
+export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogglePin, isOverlaid, hasGeoref, onClose, onShowProcedures }: Props) {
   const [tab, setTab] = useState<Tab | null>(null);
   const [details, setDetails] = useState<AirportDetails | null>(null);
   const [charts, setCharts] = useState<ChartsState>({ status: 'loading' });
@@ -70,6 +81,86 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
   const metar = weather.status === 'ok' ? weather.metar : undefined;
   const nearby = weather.status === 'ok' ? weather.nearby : undefined;
   const atis = useIvaoAtis(airport.icao || null);
+  const [procedures, setProcedures] = useState<AirportProcedureSet | 'loading' | 'error'>('loading');
+  const [shownProcedures, setShownProcedures] = useState<Set<string>>(new Set());
+
+  // SID et STAR de l'aérodrome ; aucune affichée au changement d'aérodrome
+  useEffect(() => {
+    let cancelled = false;
+    setShownProcedures(new Set());
+    if (!airport.icao) {
+      setProcedures({ procedures: [], approaches: [] });
+      return;
+    }
+    setProcedures('loading');
+    loadPlacedProcedures(airport).then(
+      (list) => !cancelled && setProcedures(list),
+      () => !cancelled && setProcedures('error'),
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [airport]);
+
+  useEffect(() => {
+    const set = typeof procedures === 'object' ? procedures : { procedures: [], approaches: [] };
+    const list = set.procedures.filter((p) => shownProcedures.has(procedureKey(p.procedure)));
+    const approaches = set.approaches.filter((a) => shownProcedures.has(approachKey(a.approach)));
+    onShowProcedures(list.length || approaches.length ? proceduresGeoJson(airport, list, approaches) : null);
+  }, [airport, procedures, shownProcedures, onShowProcedures]);
+  // Fiche fermée : plus de procédure sur la carte
+  useEffect(() => () => onShowProcedures(null), [onShowProcedures]);
+
+  const toggleProcedure = (key: string) =>
+    setShownProcedures((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  const showProcedures = (keys: string[], show: boolean) =>
+    setShownProcedures((prev) => {
+      const next = new Set(prev);
+      for (const k of keys) {
+        if (show) next.add(k);
+        else next.delete(k);
+      }
+      return next;
+    });
+  // Pastilles des SID, STAR et approches qu'on sait tracer (au moins deux points situés)
+  const pickerItems = (kind: 'SID' | 'STAR' | 'APP'): PickerItem[] | 'loading' => {
+    if (procedures === 'loading') return 'loading';
+    if (procedures === 'error') return [];
+    if (kind === 'APP') {
+      return procedures.approaches
+        .filter((a) => a.final.length + a.initial.length > 0)
+        .map(({ approach, missing }) => ({
+          key: approachKey(approach),
+          label: approach.name,
+          group: approach.runway,
+          title: `${approach.name} piste ${approach.runway}${approach.initial.length ? ` · IAF ${approach.initial.map((b) => b.iaf).join(', ')}` : ''} · finale ${approach.final.join(' ')}${approach.missed.length ? ` · API ${approach.missed.join(' ')}` : ''}${missing.length ? ` (non situés : ${missing.join(', ')})` : ''}`,
+        }));
+    }
+    return procedures.procedures
+      .filter((p) => p.procedure.type === kind && p.points.length > 0)
+      .map(({ procedure, missing }) => {
+        const runways = procedure.runways.length ? ` · piste${procedure.runways.length > 1 ? 's' : ''} ${procedure.runways.join(', ')}` : '';
+        // Point de transition : dernier point d'une SID, premier d'une STAR
+        const transition = (kind === 'SID' ? procedure.fixes.at(-1) : procedure.fixes[0]) ?? procedure.ident;
+        return {
+          key: procedureKey(procedure),
+          label: procedure.ident,
+          group: transition,
+          title: `${procedure.name}${runways} : ${procedure.fixes.join(' ')}${missing.length ? ` (non situés : ${missing.join(', ')})` : ''}`,
+        };
+      });
+  };
+  const hasProcedures = (group: ChartGroup) => {
+    const kinds = group === 'DEP' ? (['SID'] as const) : group === 'ARR' ? (['STAR'] as const) : group === 'APP' ? (['APP'] as const) : [];
+    return kinds.some((k) => {
+      const items = pickerItems(k);
+      return items !== 'loading' && items.length > 0;
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -132,6 +223,33 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
   };
 
   const renderGroup = (group: ChartGroup) => {
+    // Départs, arrivées et approches : procédures à tracer sur la carte, au-dessus des cartes officielles
+    const kind = group === 'DEP' ? 'SID' : group === 'ARR' ? 'STAR' : group === 'APP' ? 'APP' : null;
+    const picker = kind && (
+      <ProcedurePicker
+        title={kind === 'APP' ? 'Approches' : kind}
+        variant={kind === 'SID' ? 'sid' : kind === 'STAR' ? 'star' : 'app'}
+        items={pickerItems(kind)}
+        shown={shownProcedures}
+        onToggle={toggleProcedure}
+        onShowAll={showProcedures}
+        groupLabel={kind === 'APP' ? (runway) => `Piste ${runway}` : undefined}
+        note={
+          kind === 'APP'
+            ? 'Seules les approches dont l’eAIP publie le tableau de codage peuvent être tracées : les approches conventionnelles (VOR, NDB, certains ILS) restent sur leurs cartes.'
+            : undefined
+        }
+      />
+    );
+    return (
+      <>
+        {picker}
+        {renderCharts(group)}
+      </>
+    );
+  };
+
+  const renderCharts = (group: ChartGroup) => {
     if (charts.status === 'loading') return <p className="placeholder">Chargement des cartes officielles…</p>;
     if (charts.status === 'error') return <p className="placeholder error">Impossible de charger les cartes : {charts.message}</p>;
     const items = list.filter((c) => GROUP_OF[c.category] === group);
@@ -337,7 +455,8 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
               className={activeTab === g ? 'group-tab on' : 'group-tab'}
               style={{ '--type': groupColor(g) } as React.CSSProperties}
               onClick={() => setTab(g)}
-              disabled={charts.status === 'ok' && count === 0}
+              // Départs et arrivées restent accessibles s'il y a des SID ou STAR à tracer, même sans carte
+              disabled={charts.status === 'ok' && count === 0 && !hasProcedures(g)}
               title={GROUP_LABELS[g]}
             >
               {g}

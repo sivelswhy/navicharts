@@ -74,9 +74,19 @@ export interface Procedure {
   fixes: string[];
 }
 
-interface AirportProcedures {
+/** Approche aux instruments d'une piste (tableaux de codage INA et FNA de l'eAIP France, voir server/procedures.ts) */
+export interface Approach {
+  name: string;
+  runway: string;
+  initial: { iaf: string; fixes: string[] }[];
+  final: string[];
+  missed: string[];
+}
+
+export interface AirportProcedures {
   procedures: Procedure[];
   waypoints: Record<string, LngLat>;
+  approaches?: Approach[];
 }
 
 /** Procédures publiées dans les tableaux de codage de l'eAIP France (non disponibles ailleurs) */
@@ -91,7 +101,7 @@ async function fetchEaipProcedures(icao: string): Promise<AirportProcedures | nu
  * pour tout aérodrome couvert. Autorouter ne donne pas les pistes : elles sont reprises de l'eAIP quand la procédure
  * y figure, sinon la procédure est proposée pour toutes les pistes. Repli sur l'eAIP si autorouter n'a rien.
  */
-async function fetchProcedures(airport: Airport): Promise<AirportProcedures | null> {
+export async function fetchProcedures(airport: Airport): Promise<AirportProcedures | null> {
   const eaip = fetchEaipProcedures(airport.icao).catch(() => null);
   if (!import.meta.env.DEV) return eaip;
   const res = await fetch(`/dev/autorouter/procedures/${airport.icao}?lon=${airport.lon}&lat=${airport.lat}`).catch(() => null);
@@ -102,6 +112,9 @@ async function fetchProcedures(airport: Airport): Promise<AirportProcedures | nu
     for (const p of autorouter.procedures) {
       p.runways = [...new Set(fromEaip.procedures.filter((q) => q.type === p.type && q.ident === p.ident).flatMap((q) => q.runways))];
     }
+    // Approches : seulement dans l'eAIP (autorouter n'en publie pas), avec leurs points
+    autorouter.approaches = fromEaip.approaches;
+    autorouter.waypoints = { ...fromEaip.waypoints, ...autorouter.waypoints };
   }
   return autorouter;
 }

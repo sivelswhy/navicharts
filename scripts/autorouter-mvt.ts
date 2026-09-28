@@ -282,3 +282,196 @@ export function mergeChildTiles(children: Uint8Array[], k: number): Uint8Array {
   }
   return tile.finish();
 }
+
+// ───────── Découpage au bord de la tuile ─────────
+
+type Pt = [number, number];
+
+/** Segment [a, b] découpé à la boîte (Liang-Barsky) ; null s'il est entièrement dehors */
+function clipSegment(a: Pt, b: Pt, lo: number, hi: number): [Pt, Pt] | null {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  for (const [p, q] of [
+    [-dx, a[0] - lo],
+    [dx, hi - a[0]],
+    [-dy, a[1] - lo],
+    [dy, hi - a[1]],
+  ]) {
+    if (p === 0) {
+      if (q < 0) return null;
+    } else {
+      const t = q / p;
+      if (p < 0) t0 = Math.max(t0, t);
+      else t1 = Math.min(t1, t);
+      if (t0 > t1) return null;
+    }
+  }
+  const at = (t: number): Pt => [Math.round(a[0] + t * dx), Math.round(a[1] + t * dy)];
+  return [at(t0), at(t1)];
+}
+
+/** Ligne découpée à la boîte : un morceau par passage à l'intérieur */
+function clipLine(line: Pt[], lo: number, hi: number): Pt[][] {
+  const parts: Pt[][] = [];
+  let current: Pt[] | null = null;
+  for (let i = 1; i < line.length; i++) {
+    const seg = clipSegment(line[i - 1], line[i], lo, hi);
+    if (!seg) {
+      current = null;
+      continue;
+    }
+    const [s, e] = seg;
+    const last = current?.at(-1);
+    if (!current || !last || last[0] !== s[0] || last[1] !== s[1]) parts.push((current = [s]));
+    current.push(e);
+    // Sortie de la boîte : le morceau suivant repartira de son point d'entrée
+    if (e[0] !== line[i][0] || e[1] !== line[i][1]) current = null;
+  }
+  return parts.filter((p) => p.length >= 2);
+}
+
+/** Anneau de polygone découpé à la boîte (Sutherland-Hodgman) */
+function clipRing(ring: Pt[], lo: number, hi: number): Pt[] {
+  let out = ring;
+  const edges: [(p: Pt) => boolean, (a: Pt, b: Pt) => Pt][] = [
+    [(p) => p[0] >= lo, (a, b) => [lo, Math.round(a[1] + ((lo - a[0]) * (b[1] - a[1])) / (b[0] - a[0]))]],
+    [(p) => p[0] <= hi, (a, b) => [hi, Math.round(a[1] + ((hi - a[0]) * (b[1] - a[1])) / (b[0] - a[0]))]],
+    [(p) => p[1] >= lo, (a, b) => [Math.round(a[0] + ((lo - a[1]) * (b[0] - a[0])) / (b[1] - a[1])), lo]],
+    [(p) => p[1] <= hi, (a, b) => [Math.round(a[0] + ((hi - a[1]) * (b[0] - a[0])) / (b[1] - a[1])), hi]],
+  ];
+  for (const [inside, cross] of edges) {
+    const input = out;
+    out = [];
+    for (let i = 0; i < input.length; i++) {
+      const cur = input[i];
+      const prev = input[(i + input.length - 1) % input.length];
+      if (inside(cur)) {
+        if (!inside(prev)) out.push(cross(prev, cur));
+        out.push(cur);
+      } else if (inside(prev)) out.push(cross(prev, cur));
+    }
+    if (!out.length) break;
+  }
+  return out;
+}
+
+const signedArea = (ring: Pt[]) => ring.reduce((s, p, i) => s + (ring[(i + 1) % ring.length][0] - p[0]) * (ring[(i + 1) % ring.length][1] + p[1]), 0);
+
+/** Géométrie MVT (commandes) → parties en coordonnées absolues */
+function decodeGeometry(geometry: number[]): Pt[][] {
+  const parts: Pt[][] = [];
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < geometry.length; ) {
+    const command = geometry[i] & 7;
+    const count = geometry[i++] >> 3;
+    if (command === 7) continue;
+    if (command === 1) parts.push([]);
+    for (let c = 0; c < count; c++) {
+      x += zigzag(geometry[i++]);
+      y += zigzag(geometry[i++]);
+      parts.at(-1)!.push([x, y]);
+    }
+  }
+  return parts;
+}
+
+function encodeGeometry(parts: Pt[][], type: number): number[] {
+  const out: number[] = [];
+  let x = 0;
+  let y = 0;
+  const move = (p: Pt) => {
+    out.push(unzigzag(p[0] - x), unzigzag(p[1] - y));
+    [x, y] = p;
+  };
+  if (type === 1) {
+    out.push(((parts.length & 0x1fffffff) << 3) | 1);
+    for (const [p] of parts) move(p);
+    return out;
+  }
+  for (const part of parts) {
+    out.push((1 << 3) | 1);
+    move(part[0]);
+    out.push(((part.length - 1) << 3) | 2);
+    for (const p of part.slice(1)) move(p);
+    if (type === 3) out.push((1 << 3) | 7);
+  }
+  return out;
+}
+
+/** Géométrie découpée à la boîte selon son type (1 points, 2 lignes, 3 polygones) ; vide si tout est dehors */
+function clipGeometry(parts: Pt[][], type: number, lo: number, hi: number): Pt[][] {
+  if (type === 1) return parts.flat().filter((p) => p[0] >= lo && p[0] <= hi && p[1] >= lo && p[1] <= hi).map((p) => [p]);
+  if (type === 2) return parts.flatMap((line) => clipLine(line, lo, hi));
+  // Polygones : anneaux extérieurs et leurs trous ; un trou dont l'extérieur disparaît disparaît aussi
+  const out: Pt[][] = [];
+  let outerKept = false;
+  const outerSign = Math.sign(signedArea(parts[0] ?? []));
+  for (const ring of parts) {
+    const isOuter = Math.sign(signedArea(ring)) === outerSign;
+    if (!isOuter && !outerKept) continue;
+    const clipped = clipRing(ring, lo, hi);
+    const kept = clipped.length >= 3 && signedArea(clipped) !== 0;
+    if (isOuter) outerKept = kept;
+    if (kept) out.push(clipped);
+  }
+  return out;
+}
+
+/**
+ * Tuile dont les géométries sont découpées à son bord, plus une marge de `buffer` (en 1/16 d'étendue par défaut).
+ * Les tuiles autorouter ne découpent pas leurs tracés : ils débordent de plusieurs tuiles, au-delà de ce que
+ * MapLibre accepte (coordonnées écrasées, tracés déformés ou interrompus au bord des tuiles à certains zooms).
+ */
+export function clipTileToBuffer(buf: Uint8Array, bufferRatio = 1 / 16): Uint8Array {
+  const tile = new Writer();
+  const reader = new Pbf(buf);
+  while (!reader.done) {
+    const layerField = reader.field();
+    if (layerField.num !== 3) continue;
+    const pbf = new Pbf(layerField.bytes!);
+    const fields: { num: number; bytes?: Uint8Array; value?: number }[] = [];
+    let extent = 4096;
+    while (!pbf.done) {
+      const f = pbf.field();
+      if (f.num === 5) extent = f.value!;
+      fields.push(f);
+    }
+    const lo = -Math.round(extent * bufferRatio);
+    const hi = extent - lo;
+    const out = new Writer();
+    for (const f of fields) {
+      if (f.num !== 2) {
+        if (f.bytes) out.message(f.num, f.bytes);
+        else out.uint(f.num, f.value!);
+        continue;
+      }
+      // Entité : géométrie découpée, le reste inchangé
+      const feature = new Pbf(f.bytes!);
+      const parts: { num: number; bytes?: Uint8Array; value?: number }[] = [];
+      let type = 0;
+      let geometry: number[] = [];
+      while (!feature.done) {
+        const g = feature.field();
+        if (g.num === 3) type = g.value!;
+        if (g.num === 4) geometry = new Pbf(g.bytes!).packed();
+        else parts.push(g);
+      }
+      const decoded = decodeGeometry(geometry);
+      const outside = decoded.some((part) => part.some(([x, y]) => x < lo || x > hi || y < lo || y > hi));
+      const clipped = outside ? clipGeometry(decoded, type, lo, hi) : decoded;
+      if (!clipped.length) continue;
+      const fw = new Writer();
+      for (const g of parts) {
+        if (g.bytes) fw.message(g.num, g.bytes);
+        else fw.uint(g.num, g.value!);
+      }
+      fw.packed(4, outside ? encodeGeometry(clipped, type) : geometry);
+      out.message(2, fw.finish());
+    }
+    tile.message(3, out.finish());
+  }
+  return tile.finish();
+}

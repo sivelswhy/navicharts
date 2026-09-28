@@ -6,12 +6,6 @@ import type { FlightRoute, Procedure, RouteChange, RouteProgress, Terminal } fro
 import type { Chart } from '../lib/types.ts';
 import { WeatherSection } from './Weather.tsx';
 
-// En dev, SID et STAR viennent des tuiles autorouter (test local, voir route.ts)
-const PROCEDURE_COVERAGE = import.meta.env.DEV
-  ? 'Listes d’après autorouter, pistes selon l’eAIP pour les aérodromes français.'
-  : 'Listes disponibles pour les aérodromes français.';
-const PROCEDURE_SOURCE = import.meta.env.DEV ? 'autorouter' : 'les tableaux de codage de l’eAIP (France)';
-
 export const EXAMPLE_ROUTE =
   'LFPG/27L N0481F350 AGOP6A AGOPA DCT ARKIP DCT ARMAL DCT ARTAX DCT BEBIX DCT LMG DCT UVELI DCT OSMOB DCT VAVIX DCT MAGEC MAGE2S LFBZ/27';
 
@@ -69,7 +63,6 @@ function IvaoSection({ ivao }: { ivao: IvaoLink }) {
             Lier
           </button>
         </form>
-        <p className="footnote">Votre plan de vol déposé sur IVAO sera importé et votre avion suivi sur la carte.</p>
       </section>
     );
   }
@@ -281,7 +274,6 @@ function TerminalCharts({
 
 /** Saisie d'une route au format plan de vol OACI, résumé du vol et cartes associées */
 export function FlightPanel({ text, onText, route, status, onShow, onClear, onSelectAirport, onOpenChart, openChart, onChange, ivao }: Props) {
-  let cumulative = 0;
   return (
     <div className="flight">
       <div className="flight-form">
@@ -383,7 +375,6 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
                   onProcedure={(star) => onChange({ star })}
                 />
               )}
-              <p className="footnote picker-note">✓ : dessert le premier (ou dernier) point de votre route. {PROCEDURE_COVERAGE}</p>
             </section>
           )}
           {route.notes.map((note) => (
@@ -393,8 +384,7 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
           ))}
           {route.unresolved.length > 0 && (
             <p className="notice">
-              Éléments non localisés (tracés en direct entre leurs voisins) : {route.unresolved.join(', ')}. Les points de
-              report ne sont connus que pour la France.
+              Éléments non localisés (tracés en direct entre leurs voisins) : {route.unresolved.join(', ')}.
             </p>
           )}
 
@@ -405,43 +395,6 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
             <TerminalCharts terminal={route.arrival} kind="STAR" procedure={route.star} fix={route.starFix} onOpenChart={onOpenChart} openChart={openChart} />
           )}
 
-          <h3 className="list-heading">Branches</h3>
-          <ul className="route-legend" aria-label="Légende du tracé">
-            <li className="departure">SID</li>
-            <li className="enroute">Route</li>
-            <li className="arrival">STAR et approche</li>
-          </ul>
-          <table className="table legs">
-            <thead>
-              <tr>
-                <th>Vers</th>
-                <th>Via</th>
-                <th className="right">Rv</th>
-                <th className="right">NM</th>
-                <th className="right">Cumul</th>
-              </tr>
-            </thead>
-            <tbody>
-              {route.legs.map((leg, i) => {
-                cumulative += leg.distanceNm;
-                return (
-                  <tr key={i} className={leg.phase}>
-                    <td className="mono strong" title={leg.to.name}>
-                      {leg.to.ident}
-                    </td>
-                    <td className="mono">{leg.via}</td>
-                    <td className="mono right">{String(Math.round(leg.courseT) % 360).padStart(3, '0')}°</td>
-                    <td className="mono right">{leg.distanceNm.toFixed(0)}</td>
-                    <td className="mono right">{cumulative.toFixed(0)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <p className="footnote">
-            Routes vraies (Rv) et distances orthodromiques. SID et STAR d’après {PROCEDURE_SOURCE} ;
-            branches sans point (montée jusqu’à une altitude…) et fin d’approche simplifiées : suivez la carte officielle.
-          </p>
         </div>
       )}
     </div>

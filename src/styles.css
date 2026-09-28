@@ -45,10 +45,11 @@
   /* Tracé du plan de vol, par phase (mêmes couleurs sur la carte) */
   --route: #c2188f;
   --route-light: #e85bb8;
-  --sid: #e8590c;
-  --sid-light: #ff8a4c;
-  --star: #2b9348;
-  --star-light: #52c46a;
+  /* SID et STAR : mêmes couleurs que sur la carte (AERO_COLORS dans aeroIcons.ts) */
+  --sid: #1f7a4d;
+  --sid-light: #3fb97a;
+  --star: #b4442c;
+  --star-light: #e5745a;
 
   --text: #ffffff;
   --text-2: var(--gray-100);
@@ -864,11 +865,6 @@ h3 {
   font-size: 18px;
 }
 
-.table.legs td,
-.table.legs th {
-  padding: 5px 4px;
-}
-
 /* Liaison IVAO */
 .ivao {
   margin: 0 -16px 12px;
@@ -1282,53 +1278,6 @@ h3 {
 .picker-field select:focus {
   outline: none;
   border-color: var(--blue-25);
-}
-
-.picker-note {
-  margin: 2px 8px 0;
-}
-
-.table.legs tr.departure td {
-  color: var(--sid-light);
-}
-
-.table.legs tr.arrival td {
-  color: var(--star-light);
-}
-
-.route-legend {
-  display: flex;
-  gap: 14px;
-  margin: 0 16px 8px;
-  padding: 0;
-  list-style: none;
-  color: var(--text-3);
-  font-size: 12px;
-}
-
-.route-legend li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.route-legend li::before {
-  content: '';
-  width: 16px;
-  height: 3px;
-  border-radius: 2px;
-}
-
-.route-legend .departure::before {
-  background: var(--sid);
-}
-
-.route-legend .enroute::before {
-  background: var(--route);
-}
-
-.route-legend .arrival::before {
-  background: var(--star);
 }
 
 /* ───────── Pinboard ───────── */
@@ -2180,4 +2129,106 @@ h3 {
 
 .nat-remarks li + li {
   margin-top: 4px;
+}
+
+/* ───────── SID et STAR sur la carte (fiche aérodrome) ───────── */
+
+.procedure-picker {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.procedure-picker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-right: 16px;
+}
+
+.procedure-picker-head .link-button {
+  flex: none;
+  white-space: nowrap;
+}
+
+.procedure-picker-note {
+  margin: 2px 16px 6px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.procedure-picker-count {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.procedure-picker-status {
+  margin: 12px 16px;
+}
+
+.procedure-groups {
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 2px 16px 8px;
+}
+
+/* Un groupe par ligne : nom du point (ou de la piste) à gauche, ses procédures à droite */
+.procedure-group {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
+.procedure-group-name {
+  padding: 4px 0;
+  color: var(--text-3);
+  font: 700 11px/1.2 var(--mono);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.procedure-group-name:hover,
+.procedure-group-name.on {
+  color: var(--text);
+}
+
+.procedure-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.procedure-chip {
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--bg-400);
+  box-shadow: inset 0 0 0 1px var(--bg-300);
+  color: var(--text-2);
+  font: 600 11.5px/1.2 var(--mono);
+}
+
+.procedure-chip:hover {
+  color: var(--text);
+}
+
+.procedure-picker-sid .procedure-chip.on {
+  background: #1f7a4d;
+  box-shadow: none;
+  color: #fff;
+}
+
+.procedure-picker-star .procedure-chip.on {
+  background: #b4442c;
+  box-shadow: none;
+  color: #fff;
+}
+
+.procedure-picker-app .procedure-chip.on {
+  background: #2d5fc4;
+  box-shadow: none;
+  color: #fff;
 }

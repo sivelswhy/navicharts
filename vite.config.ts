@@ -3,6 +3,7 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { handleApi } from './server/api.ts';
 import { loadAutorouterTile, type AutorouterKind } from './scripts/autorouter-tiles.ts';
+import { clipTileToBuffer } from './scripts/autorouter-mvt.ts';
 import { getAutorouterNav } from './scripts/autorouter-nav.ts';
 import { getAutorouterProcedures } from './scripts/autorouter-procedures.ts';
 import { getAutorouterNavaid, searchAutorouterNav } from './scripts/autorouter-search.ts';
@@ -57,7 +58,8 @@ const api: Plugin = {
       loadAutorouterTile(m[1] as AutorouterKind, m[2], m[3], m[4]).then(
         (data) => {
           if (data.length === 0) return res.writeHead(204).end();
-          res.writeHead(200, { 'Content-Type': 'application/vnd.mapbox-vector-tile' }).end(data);
+          // Tracés découpés au bord de la tuile : autorouter les laisse déborder de plusieurs tuiles
+          res.writeHead(200, { 'Content-Type': 'application/vnd.mapbox-vector-tile' }).end(clipTileToBuffer(data));
         },
         () => res.writeHead(502).end(),
       );
