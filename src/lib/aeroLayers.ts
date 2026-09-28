@@ -26,13 +26,13 @@ export const LAYER_GROUP_LABELS: Partial<Record<LayerGroup, string>> = {
   // Remplacées pour l'instant par les routes autorouter pendant les tests
   ...(!AUTOROUTER && { airways: 'Routes RNAV (France)' }),
   ...(AUTOROUTER && {
-    autorouterAirspaces: 'Espaces aériens autorouter (test local)',
-    autorouter: 'Routes autorouter (test local)',
-    autorouterSid: 'SID autorouter (test local)',
-    autorouterStar: 'STAR autorouter (test local)',
+    autorouterAirspaces: 'Espaces aériens autorouter',
+    autorouter: 'Routes autorouter',
+    autorouterSid: 'SID autorouter',
+    autorouterStar: 'STAR autorouter',
   }),
   ...(!AUTOROUTER && { waypoints: 'Points de report (France)' }),
-  ...(AUTOROUTER && { autorouterPoints: 'Points de report autorouter (test local)' }),
+  ...(AUTOROUTER && { autorouterPoints: 'Points de report autorouter' }),
   navaids: 'Balises',
   airports: 'Aérodromes',
   ground: 'Plan au sol',
@@ -180,7 +180,7 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       // Pas de vues d'ensemble : assemblés, les polygones découpés feraient apparaître les bords des tuiles
       minzoom: 5,
       maxzoom: 10,
-      attribution: 'Espaces aériens © autorouter / EAD (test local)',
+      attribution: 'Espaces aériens © autorouter / EAD',
     });
     const src = { source: 'autorouter-airspace', 'source-layer': 'airspace' } as const;
     const is = (object: string) => ['==', ['get', 'object'], object];
@@ -303,7 +303,7 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
         // autorouter fournit les tuiles dès le zoom 5 ; en dessous, vues d'ensemble assemblées par le serveur de dev
         minzoom: 3,
         maxzoom: 10,
-        attribution: 'Routes et procédures © autorouter (test local)',
+        attribution: 'Routes et procédures © autorouter',
       });
     }
     const src = (kind: string) => ({ source: `autorouter-${kind}`, 'source-layer': 'airway' }) as const;
@@ -417,7 +417,7 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       tiles: [`${location.origin}/dev/autorouter/designatedpoint/{z}/{x}/{y}.mvt`],
       minzoom: 3,
       maxzoom: 10,
-      attribution: 'Points © autorouter (test local)',
+      attribution: 'Points © autorouter',
     });
     // Tous les points : type 0 (points en route à 5 lettres) mis en avant, les autres (points terminaux,
     // points liés à une balise…) plus petits et plus discrets, leur nom à partir du zoom 10
@@ -672,7 +672,7 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       tiles: [`${location.origin}/dev/autorouter/navaid/{z}/{x}/{y}.mvt`],
       minzoom: 5,
       maxzoom: 10,
-      attribution: 'Balises © autorouter (test local)',
+      attribution: 'Balises © autorouter',
     });
     add({
       id: 'autorouter-vor-rose',

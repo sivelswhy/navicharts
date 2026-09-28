@@ -101,7 +101,7 @@ export function NavaidPanel({ navaid, onClose }: Props) {
           </div>
         </dl>
         <p className="footnote">
-          {d ? 'Détail : autorouter (test local). ' : ''}Données non certifiées, référez-vous toujours à l’AIP.
+          {d ? 'Détail : autorouter. ' : ''}Données non certifiées, référez-vous toujours à l’AIP.
         </p>
       </div>
     </div>

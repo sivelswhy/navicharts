@@ -8,9 +8,9 @@ import { WeatherSection } from './Weather.tsx';
 
 // En dev, SID et STAR viennent des tuiles autorouter (test local, voir route.ts)
 const PROCEDURE_COVERAGE = import.meta.env.DEV
-  ? 'Listes d’après autorouter (test local), pistes selon l’eAIP pour les aérodromes français.'
+  ? 'Listes d’après autorouter, pistes selon l’eAIP pour les aérodromes français.'
   : 'Listes disponibles pour les aérodromes français.';
-const PROCEDURE_SOURCE = import.meta.env.DEV ? 'autorouter (test local)' : 'les tableaux de codage de l’eAIP (France)';
+const PROCEDURE_SOURCE = import.meta.env.DEV ? 'autorouter' : 'les tableaux de codage de l’eAIP (France)';
 
 export const EXAMPLE_ROUTE =
   'LFPG/27L N0481F350 AGOP6A AGOPA DCT ARKIP DCT ARMAL DCT ARTAX DCT BEBIX DCT LMG DCT UVELI DCT OSMOB DCT VAVIX DCT MAGEC MAGE2S LFBZ/27';

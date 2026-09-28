@@ -87,7 +87,7 @@ export function AirspacePanel({ airspace, onClose }: Props) {
           </div>
         </dl>
         <p className="footnote">
-          Espaces aériens : autorouter / EAD (test local). Classe, horaires et fréquences non disponibles ici : référez-vous
+          Espaces aériens : autorouter / EAD. Classe, horaires et fréquences non disponibles ici : référez-vous
           toujours à l’AIP.
         </p>
       </div>
