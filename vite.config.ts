@@ -84,6 +84,8 @@ const version = gitVersion();
 
 export default defineConfig({
   plugins: [react(), api],
+  // Worker MapLibre chargé en module ({ type: 'module' })
+  worker: { format: 'es' },
   define: {
     __APP_COMMIT__: JSON.stringify(version.commit),
     __APP_COMMIT_DATE__: JSON.stringify(version.date),

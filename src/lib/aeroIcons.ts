@@ -76,6 +76,7 @@ const ICONS: Record<string, string> = {
       dot(AERO_COLORS.ndb, 3),
   ),
   waypoint: svg(`<polygon points="${C},7 26,25 6,25" fill="#fff" stroke="${AERO_COLORS.waypoint}" stroke-width="2.4" stroke-linejoin="round"/>`),
+  vrp: svg(`<polygon points="${C},8 25,24 7,24" fill="${AERO_COLORS.vfr}" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>`),
   'airport-ifr': svg(
     `<circle cx="${C}" cy="${C}" r="10" fill="#fff" stroke="${AERO_COLORS.ifr}" stroke-width="3.5"/>` +
       // Petites graduations autour du cercle, à la manière des symboles d'aérodromes équipés

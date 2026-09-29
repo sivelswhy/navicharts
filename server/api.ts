@@ -9,6 +9,8 @@ import { getMetars, getNearestMetar } from './metar.ts';
 import { getNatTracks } from './nat.ts';
 import { getNotams } from './notam.ts';
 import { getProcedures } from './procedures.ts';
+import { getSectorProcedures } from './sectorfiles.ts';
+import { SIA_ICAO } from './sia.ts';
 import { CHART_HOSTS, getCharts } from './charts.ts';
 
 const USER_AGENT = { 'User-Agent': 'NaviCharts (usage personnel)' };
@@ -181,10 +183,13 @@ export async function handleApi(req: IncomingMessage, res: ServerResponse): Prom
       return true;
     }
 
-    // SID et STAR (tableaux de codage de l'eAIP France)
-    const procedures = url.pathname.match(/^\/api\/procedures\/(LF[A-Z]{2})$/);
+    // SID, STAR et approches : tableaux de codage des eAIP du SIA (métropole, outre-mer), sector files IVAO (Amériques)
+    const procedures = url.pathname.match(/^\/api\/procedures\/([A-Z0-9]{3,4})$/);
     if (procedures) {
-      sendJson(res, 200, await getProcedures(procedures[1]));
+      const ident = procedures[1];
+      const data = SIA_ICAO.test(ident) ? await getProcedures(ident) : await getSectorProcedures(ident).catch(() => null);
+      if (data) sendJson(res, 200, data);
+      else sendJson(res, 404, { error: 'Aucune procédure pour cet aérodrome' });
       return true;
     }
 

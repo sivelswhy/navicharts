@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CATEGORY_LABELS, CHART_GROUPS, GROUP_LABELS, GROUP_OF, groupColor, type ChartGroup } from '../lib/chartGroups.ts';
 import { fetchCharts, fetchNotams, loadDetails, type Notam, type NotamResult } from '../lib/data.ts';
 import { useAirportMetar, useIvaoAtis } from '../lib/metar.ts';
+import { SECTOR_FILE_COUNTRIES } from '../lib/route.ts';
 import type { Airport, AirportCharts, AirportDetails, Chart, ChartCategory } from '../lib/types.ts';
 import { IconClose, IconExternal, IconOverlay, IconPin } from './icons.tsx';
 import { ProcedurePicker, type PickerItem } from './ProcedurePicker.tsx';
@@ -88,7 +89,7 @@ export function AirportPanel({ airport, openChart, onOpenChart, isPinned, onTogg
   useEffect(() => {
     let cancelled = false;
     setShownProcedures(new Set());
-    if (!airport.icao) {
+    if (!airport.icao && !SECTOR_FILE_COUNTRIES.has(airport.country)) {
       setProcedures({ procedures: [], approaches: [] });
       return;
     }

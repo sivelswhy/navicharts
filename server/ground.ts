@@ -1,7 +1,9 @@
 // Plan de l'aérodrome au sol (taxiways, aires de trafic, points d'attente, postes de stationnement)
+// d'après les sector files IVAO quand ils couvrent l'aérodrome (Amérique du Nord, voir sectorfiles.ts), sinon
 // d'après OpenStreetMap, via l'API Overpass. Résultat mis en cache sur disque par aérodrome.
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { getSectorGround } from './sectorfiles.ts';
 
 const CACHE_DIR = path.resolve(import.meta.dirname, '..', '.cache', 'ground');
 const CACHE_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
@@ -22,7 +24,8 @@ export interface GroundFeature {
   type: 'Feature';
   geometry: Geometry;
   properties: {
-    kind: 'taxiway' | 'runway' | 'apron' | 'holding' | 'stand';
+    /** `building` et `pier` (passerelles) : sector files IVAO uniquement */
+    kind: 'taxiway' | 'runway' | 'apron' | 'building' | 'pier' | 'holding' | 'stand';
     ref: string | null;
     /** Point d'attente : « runway », « ILS », « intermediate »… */
     holdingType?: string | null;
@@ -160,6 +163,9 @@ const RETRY_DELAY_MS = 2 * 60 * 1000;
 const failures = new Map<string, { at: number; error: Error }>();
 
 export async function getGround(ident: string, lat: number, lon: number): Promise<GroundFeature[]> {
+  const sector = await getSectorGround(ident).catch(() => null);
+  if (sector?.length) return sector;
+
   const file = path.join(CACHE_DIR, `${ident}.json`);
   const fresh = await stat(file).then((s) => Date.now() - s.mtimeMs < CACHE_MAX_AGE_MS, () => false);
   if (fresh) return JSON.parse(await readFile(file, 'utf8'));

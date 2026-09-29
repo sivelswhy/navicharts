@@ -1,21 +1,20 @@
 import { useCallback, useState } from 'react';
 import { aeroIconUrl, type AeroIcon } from '../lib/aeroIcons.ts';
-import { LAYER_GROUP_LABELS, type LayerGroup } from '../lib/aeroLayers.ts';
+import { LAYER_GROUP_LABELS, LAYER_SECTIONS, type LayerGroup } from '../lib/aeroLayers.ts';
 import { IconChevronDown, IconClose } from './icons.tsx';
 
 const KEY = 'navicharts:layers';
 const DEFAULTS: Record<LayerGroup, boolean> = {
   airspaces: true,
   airways: true,
-  autorouter: true,
-  autorouterAirspaces: true,
-  autorouterSid: true,
-  autorouterStar: true,
-  autorouterPoints: true,
+  procedures: true,
   waypoints: true,
   navaids: true,
   airports: true,
   ground: true,
+  vfr: true,
+  // Très dense : affichée à la demande
+  mva: false,
   // Trafic IVAO : interroge le réseau toutes les 20 s, activé à la demande
   nat: true,
   ivao: false,
@@ -62,6 +61,7 @@ const LEGEND: [AeroIcon, string][] = [
   ['tacan', 'TACAN / VORTAC'],
   ['ndb', 'NDB'],
   ['waypoint', 'Point de report'],
+  ['vrp', 'Point de report VFR'],
 ];
 
 /** Volet des couches de la carte, avec la légende des symboles */
@@ -74,16 +74,21 @@ export function LayerControl({ layers, onToggle, onClose }: Props) {
           <IconClose size={16} />
         </button>
       </header>
-      <ul className="switch-list">
-        {(Object.keys(LAYER_GROUP_LABELS) as LayerGroup[]).map((group) => (
-          <li key={group}>
-            <label className="switch-row">
-              <span>{LAYER_GROUP_LABELS[group]}</span>
-              <input type="checkbox" role="switch" checked={layers[group]} onChange={() => onToggle(group)} />
-            </label>
-          </li>
-        ))}
-      </ul>
+      {LAYER_SECTIONS.map((section) => (
+        <section key={section.title}>
+          <h4 className="list-heading">{section.title}</h4>
+          <ul className="switch-list">
+            {section.groups.map((group) => (
+              <li key={group}>
+                <label className="switch-row">
+                  <span>{LAYER_GROUP_LABELS[group]}</span>
+                  <input type="checkbox" role="switch" checked={layers[group]} onChange={() => onToggle(group)} />
+                </label>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
       {/* Légende repliée par défaut, dépliée d'un clic */}
       <details className="legend-toggle">
         <summary className="list-heading">
@@ -96,33 +101,23 @@ export function LayerControl({ layers, onToggle, onClose }: Props) {
               <img src={aeroIconUrl(icon)} alt="" width={16} height={16} /> {label}
             </li>
           ))}
-          {import.meta.env.DEV ? (
-            <>
-              <li>
-                <i className="swatch airspace" /> CTR, TMA
-              </li>
-              <li>
-                <i className="swatch airspace-restricted" /> Zone réglementée (R) ou interdite (P)
-              </li>
-              <li>
-                <i className="swatch airspace-danger" /> Zone dangereuse (D)
-              </li>
-              <li>
-                <i className="swatch airspace-temporary" /> TRA, TSA
-              </li>
-            </>
-          ) : (
-            <>
-              <li>
-                <i className="swatch airspace" /> Espace contrôlé (classes A, C, D)
-              </li>
-              <li>
-                <i className="swatch airspace-e" /> Classe E, LTA
-              </li>
-            </>
-          )}
           <li>
-            <i className="swatch airway" /> Route RNAV
+            <i className="swatch airspace" /> Espace contrôlé (CTR, TMA, CTA)
+          </li>
+          <li>
+            <i className="swatch airspace-e" /> Classe E, LTA
+          </li>
+          <li>
+            <i className="swatch airspace-restricted" /> Zone réglementée (R) ou interdite (P)
+          </li>
+          <li>
+            <i className="swatch airspace-danger" /> Zone dangereuse (D)
+          </li>
+          <li>
+            <i className="swatch airspace-temporary" /> TRA, TSA
+          </li>
+          <li>
+            <i className="swatch airway" /> Route aérienne
           </li>
         </ul>
       </details>

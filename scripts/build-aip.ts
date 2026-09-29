@@ -1,29 +1,27 @@
-// Extrait de l'eAIP France (cycle AIRAC en vigueur) les données de navigation affichées sur la carte :
-// balises (ENR 4.1), points significatifs (ENR 4.4), routes RNAV (ENR 3.2) et espaces aériens (ENR 2.1).
+// Extrait des eAIP du SIA (cycle AIRAC en vigueur) les données de navigation affichées sur la carte :
+// balises (ENR 4.1), points significatifs (ENR 4.4), routes (ENR 3.2, et 3.1 outre-mer) et espaces aériens (ENR 2.1),
+// pour la métropole et l'outre-mer (Antilles-Guyane-SPM, Réunion-Mayotte, Nouvelle-Calédonie, Polynésie).
 // Les pages HTML du SIA sont annotées avec les champs AIXM (ex. DESIGNATED_POINT.GEO_LAT), ce qui permet
 // de les lire sans dépendre de la mise en page.
 import { currentCycle, previousCycle, type AiracCycle } from '../server/airac.ts';
-import { siaBase } from '../server/sia.ts';
+import { aerodromesOf, regionBase, SIA_REGIONS, type SiaRegion } from '../server/sia.ts';
 
 type Position = [number, number];
 type Feature = { type: 'Feature'; geometry: { type: string; coordinates: unknown }; properties: Record<string, unknown> };
 
 const USER_AGENT = { 'User-Agent': 'NaviCharts (usage personnel)' };
 
-function enrUrl(cycle: AiracCycle, section: string): string {
-  const iso = cycle.effective.toISOString().slice(0, 10);
-  return `${siaBase(cycle)}/FRANCE/AIRAC-${iso}/html/eAIP/FR-ENR-${section}-fr-FR.html`;
-}
-
-async function fetchEnr(section: string): Promise<{ html: string; cycle: AiracCycle }> {
+async function fetchEnr(section: string, region: SiaRegion): Promise<{ html: string; cycle: AiracCycle }> {
   const cycle = currentCycle();
   // Si le cycle en vigueur n'est pas encore en ligne, on prend le précédent
   for (const c of [cycle, previousCycle(cycle)]) {
-    const res = await fetch(enrUrl(c, section), { headers: USER_AGENT });
+    const base = await regionBase(c, region);
+    if (!base) continue;
+    const res = await fetch(`${base}/html/eAIP/FR-ENR-${section}-fr-FR.html`, { headers: USER_AGENT });
     if (res.ok) return { html: await res.text(), cycle: c };
-    if (res.status !== 404) throw new Error(`SIA ENR ${section} : HTTP ${res.status}`);
+    if (res.status !== 404) throw new Error(`SIA ${region.folder} ENR ${section} : HTTP ${res.status}`);
   }
-  throw new Error(`SIA ENR ${section} introuvable`);
+  throw new Error(`SIA ${region.folder} ENR ${section} introuvable`);
 }
 
 const decodeEntities = (s: string) =>
@@ -61,8 +59,8 @@ const point = (coordinates: Position, properties: Record<string, unknown>): Feat
 
 // ───────── ENR 4.1 : balises ─────────
 
-async function navaids(): Promise<Feature[]> {
-  const { html } = await fetchEnr('4.1');
+async function navaids(region: SiaRegion): Promise<Feature[]> {
+  const { html } = await fetchEnr('4.1', region);
   const features: Feature[] = [];
   for (const [, id, row] of html.matchAll(/<tr id="NAV-([^"]+)"[^>]*>([\s\S]*?)<\/tr>/g)) {
     const kind = id.split('-').slice(1).join('-'); // DME, VOR, VORDME, NDB, TACAN…
@@ -86,8 +84,8 @@ async function navaids(): Promise<Feature[]> {
 
 // ───────── ENR 4.4 : points significatifs ─────────
 
-async function waypoints(): Promise<Feature[]> {
-  const { html } = await fetchEnr('4.4');
+async function waypoints(region: SiaRegion): Promise<Feature[]> {
+  const { html } = await fetchEnr('4.4', region);
   const features: Feature[] = [];
   for (const [, row] of html.matchAll(/<tr id="SP-[^"]+"[^>]*>([\s\S]*?)<\/tr>/g)) {
     const ident = field(row, 'DESIGNATED_POINT.CODE_IDENT');
@@ -110,8 +108,8 @@ function flightLevel(value: string | null): number | null {
   return ft ? Math.round(Number(ft[1]) / 100) : Number(value) || null;
 }
 
-async function airways(): Promise<Feature[]> {
-  const { html } = await fetchEnr('3.2');
+async function airways(region: SiaRegion, section = '3.2'): Promise<Feature[]> {
+  const { html } = await fetchEnr(section, region);
   const features: Feature[] = [];
   // Chaque route commence par un tableau id="RTE-…" (qui contient lui-même des tableaux imbriqués) :
   // on découpe la page route par route, puis on lit les champs AIXM dans l'ordre du document.
@@ -228,8 +226,8 @@ function lateralLimits(cell: string): Position[] | null {
   return ring;
 }
 
-async function airspaces(): Promise<Feature[]> {
-  const { html } = await fetchEnr('2.1');
+async function airspaces(region: SiaRegion): Promise<Feature[]> {
+  const { html } = await fetchEnr('2.1', region);
   const features: Feature[] = [];
   let name = '';
   for (const [, id, row] of html.matchAll(/<tr[^>]*id="mid--([^"]+)"[^>]*>([\s\S]*?)<\/tr>/g)) {
@@ -258,22 +256,43 @@ async function airspaces(): Promise<Feature[]> {
   return features;
 }
 
-/** Aérodromes publiés en AD 2 dans l'eAIP (terrains dotés de procédures IFR, affichés différemment) */
-async function aipAerodromes(): Promise<string[]> {
-  const cycle = currentCycle();
-  const iso = cycle.effective.toISOString().slice(0, 10);
-  const res = await fetch(`${siaBase(cycle)}/FRANCE/AIRAC-${iso}/html/eAIP/FR-menu-fr-FR.html`, { headers: USER_AGENT });
-  if (!res.ok) return [];
-  return [...new Set((await res.text()).match(/FR-AD-2\.(LF[A-Z]{2})-fr-FR/g)?.map((m) => m.slice(8, 12)) ?? [])];
+/** Données d'une eAIP ; outre-mer, les routes conventionnelles (ENR 3.1) s'ajoutent aux routes RNAV (3.2) */
+async function region(r: SiaRegion) {
+  const overseas = r.folder !== 'FRANCE';
+  const optional = (p: Promise<Feature[]>) => (overseas ? p.catch(() => []) : p);
+  const [nav, points, rnav, ats, spaces, aerodromes] = await Promise.all([
+    optional(navaids(r)),
+    optional(waypoints(r)),
+    optional(airways(r)),
+    overseas ? airways(r, '3.1').catch(() => []) : Promise.resolve([]),
+    optional(airspaces(r)),
+    aerodromesOf(currentCycle(), r).catch(() => new Set<string>()),
+  ]);
+  // Données d'outre-mer marquées : en dev, la carte n'affiche que celles hors d'Europe (voir aeroLayers.ts)
+  if (overseas) for (const f of [...nav, ...points, ...rnav, ...ats, ...spaces]) f.properties.source = 'SIA outre-mer';
+  if (overseas) console.log(`  eAIP ${r.name} : ${nav.length} balises, ${points.length} points, ${rnav.length + ats.length} tronçons, ${spaces.length} espaces, ${aerodromes.size} aérodromes`);
+  return { navaids: nav, waypoints: points, airways: [...rnav, ...ats], airspaces: spaces, aerodromes: [...aerodromes] };
 }
 
 export async function buildAip() {
-  const [nav, points, routes, spaces, aerodromes] = await Promise.all([
-    navaids(),
-    waypoints(),
-    airways(),
-    airspaces(),
-    aipAerodromes(),
-  ]);
-  return { navaids: nav, waypoints: points, airways: routes, airspaces: spaces, aerodromes, cycle: currentCycle().ident };
+  // La métropole est indispensable ; une eAIP d'outre-mer indisponible est simplement ignorée
+  const [metro, ...overseas] = await Promise.all(
+    SIA_REGIONS.map((r, i) =>
+      i === 0
+        ? region(r)
+        : region(r).catch((err) => {
+            console.warn(`⚠ eAIP ${r.name} : ${err.message}`);
+            return null;
+          }),
+    ),
+  );
+  const all = [metro, ...overseas].filter((r) => r !== null);
+  return {
+    navaids: all.flatMap((r) => r.navaids),
+    waypoints: all.flatMap((r) => r.waypoints),
+    airways: all.flatMap((r) => r.airways),
+    airspaces: all.flatMap((r) => r.airspaces),
+    aerodromes: all.flatMap((r) => r.aerodromes),
+    cycle: currentCycle().ident,
+  };
 }

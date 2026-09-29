@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as maplibregl from 'maplibre-gl';
-import type { GeoJSONSource, ImageSource, MapLayerMouseEvent, PointLike } from 'maplibre-gl';
+import type { GeoJSONSource, ImageSource, MapGeoJSONFeature, MapLayerMouseEvent, PointLike } from 'maplibre-gl';
 import type { Feature, FeatureCollection, Point } from 'geojson';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { AERO_COLORS, loadAeroIcons } from '../lib/aeroIcons.ts';
 import type { NavaidInfo } from '../lib/navaid.ts';
-import { addAeroLayers, airspaceKey, procedureBandLayers, GROUND_SOURCE, highlightAirspace, type AirspaceInfo, IVAO_ATCS_SOURCE, IVAO_PILOTS_SOURCE, NAT_SOURCE, setGroupVisibility, type LayerGroup } from '../lib/aeroLayers.ts';
+import { addAeroLayers, airspaceKey, procedureBandLayers, GROUND_SOURCE, highlightAirspace, type AirspaceInfo, LOCAL_AIRSPACE_LAYERS, localAirspace, IVAO_ATCS_SOURCE, IVAO_PILOTS_SOURCE, IVAO_SECTORS_LAYERS, NAT_SOURCE, setGroupVisibility, type LayerGroup } from '../lib/aeroLayers.ts';
 import type { LngLat } from '../lib/georef.ts';
 import { baseStyle, FONT_BOLD, FONT_REGULAR } from '../lib/mapStyle.ts';
 import type { Airport } from '../lib/types.ts';
 
 // MapLibre 6 charge ses workers depuis un fichier séparé, que la pré-compilation de Vite ne sait pas retrouver.
+// « ?worker » le fait regrouper par Vite avec ses imports (maplibre-gl-shared.mjs), absents du build avec « ?url ».
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 const SNAP_PX = 14;
@@ -510,31 +511,69 @@ export function MapView({
       m.on('mouseleave', natLayers, () => {
         if (!handlers.current.picking) m.getCanvas().style.cursor = '';
       });
-      // Espaces aériens autorouter (dev) : un clic sur un nom ou une bordure met l'espace en évidence, un autre clic l'efface
-      if (m.getLayer('autorouter-airspace-label')) {
-        const AIRSPACE_CLICK_PX = 4;
-        const airspaceLayers = ['autorouter-airspace-label', 'autorouter-airspace-line', 'autorouter-airspace-band'];
+      // Espaces aériens (autorouter en dev, eAIP France et sector files IVAO) : un clic sur un nom ou une bordure met
+      // l'espace en évidence, un autre clic l'efface
+      const airspaceLayers = ['autorouter-airspace-label', 'autorouter-airspace-line', 'autorouter-airspace-band', ...LOCAL_AIRSPACE_LAYERS].filter(
+        (id) => m.getLayer(id),
+      );
+      if (airspaceLayers.length) {
+        // Zone de clic autour du pointeur ; quand plusieurs bordures y passent, la plus proche l'emporte
+        const AIRSPACE_CLICK_PX = 8;
+        const LABEL_CLICK_PX = 3;
+        const isLabel = (id: string) => id === 'autorouter-airspace-label' || id === 'airspace-label';
+        const around = ({ x, y }: { x: number; y: number }, px: number): [PointLike, PointLike] => [
+          [x - px, y - px],
+          [x + px, y + px],
+        ];
+        /** Distance en pixels du pointeur au tracé d'une entité (bordure de polygone ou ligne) */
+        const pixelDistance = (f: MapGeoJSONFeature, at: { x: number; y: number }) => {
+          const g = f.geometry;
+          const lines =
+            g.type === 'LineString' ? [g.coordinates] : g.type === 'MultiLineString' || g.type === 'Polygon' ? g.coordinates : g.type === 'MultiPolygon' ? g.coordinates.flat() : [];
+          let best = Infinity;
+          for (const line of lines) {
+            const pts = line.map((c) => m.project(c as [number, number]));
+            for (let i = 1; i < pts.length; i++) {
+              const [a, b] = [pts[i - 1], pts[i]];
+              const dx = b.x - a.x;
+              const dy = b.y - a.y;
+              const len2 = dx * dx + dy * dy;
+              const t = len2 ? Math.max(0, Math.min(1, ((at.x - a.x) * dx + (at.y - a.y) * dy) / len2)) : 0;
+              best = Math.min(best, Math.hypot(at.x - a.x - t * dx, at.y - a.y - t * dy));
+            }
+          }
+          return best;
+        };
+        const airspaceAt = (point: { x: number; y: number }) => {
+          // Le nom, s'il est sous le pointeur ; sinon la bordure la plus proche
+          const label = m.queryRenderedFeatures(around(point, LABEL_CLICK_PX), { layers: airspaceLayers }).find((f) => isLabel(f.layer.id));
+          if (label) return label;
+          const found = m.queryRenderedFeatures(around(point, AIRSPACE_CLICK_PX), { layers: airspaceLayers }).filter((f) => !isLabel(f.layer.id));
+          let best: { f: MapGeoJSONFeature; d: number } | null = null;
+          for (const f of found) {
+            const d = pixelDistance(f, point);
+            if (!best || d < best.d) best = { f, d };
+          }
+          return best?.f;
+        };
         m.on('click', (e) => {
           if (handlers.current.picking) return;
           // Clic sur une balise ou un aérodrome : c'est lui qui est choisi
           if (m.queryRenderedFeatures(e.point, { layers: ['navaids', 'airports'] }).length || natAt(e.point)) return;
-          const { x, y } = e.point;
-          const box: [PointLike, PointLike] = [
-            [x - AIRSPACE_CLICK_PX, y - AIRSPACE_CLICK_PX],
-            [x + AIRSPACE_CLICK_PX, y + AIRSPACE_CLICK_PX],
-          ];
-          // Le nom d'abord, puis la bordure la plus haute
-          const found = m.queryRenderedFeatures(box, { layers: airspaceLayers });
-          const p = (found.find((f) => f.layer.id === 'autorouter-airspace-label') ?? found[0])?.properties as AirspaceInfo | undefined;
+          const hit = airspaceAt(e.point);
+          const p = hit && (LOCAL_AIRSPACE_LAYERS.includes(hit.layer.id) ? localAirspace(hit.properties) : (hit.properties as AirspaceInfo));
           const current = handlers.current.airspace;
           if (!p && !current) return;
           handlers.current.onAirspace(p && (!current || airspaceKey(p) !== airspaceKey(current)) ? { ...p } : null);
         });
-        m.on('mouseenter', airspaceLayers, () => {
-          if (!handlers.current.picking) m.getCanvas().style.cursor = 'pointer';
-        });
-        m.on('mouseleave', airspaceLayers, () => {
-          if (!handlers.current.picking) m.getCanvas().style.cursor = '';
+        // Curseur « main » dans toute la zone de clic, pas seulement sur le trait
+        let overAirspace = false;
+        m.on('mousemove', (e) => {
+          if (handlers.current.picking) return;
+          const over = m.queryRenderedFeatures(around(e.point, AIRSPACE_CLICK_PX), { layers: airspaceLayers }).length > 0;
+          if (over === overAirspace) return;
+          overAirspace = over;
+          m.getCanvas().style.cursor = over ? 'pointer' : '';
         });
       }
       // Plan au sol (OpenStreetMap) des aérodromes visibles, chargé à la demande et conservé
@@ -592,7 +631,7 @@ export function MapView({
   // Espace aérien mis en évidence
   useEffect(() => {
     const m = map.current;
-    if (m && ready && m.getLayer('autorouter-airspace-highlight-fill')) highlightAirspace(m, airspace);
+    if (m && ready) highlightAirspace(m, airspace);
   }, [ready, airspace]);
 
   // Aérodrome sélectionné
@@ -667,6 +706,9 @@ export function MapView({
     if (!m || !ready) return;
     (m.getSource(IVAO_PILOTS_SOURCE) as GeoJSONSource).setData(traffic?.pilots ?? EMPTY);
     (m.getSource(IVAO_ATCS_SOURCE) as GeoJSONSource).setData(traffic?.atcs ?? EMPTY);
+    // Secteurs des contrôleurs en ligne
+    const online = (traffic?.atcs.features ?? []).map((f) => String(f.properties?.callsign));
+    for (const id of IVAO_SECTORS_LAYERS) m.setFilter(id, ['in', ['get', 'callsign'], ['literal', online]]);
   }, [traffic, ready]);
 
   // SID et STAR choisies : l'aérodrome et ses procédures cadrés à la première sélection

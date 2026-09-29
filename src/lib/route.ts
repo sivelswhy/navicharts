@@ -89,10 +89,22 @@ export interface AirportProcedures {
   approaches?: Approach[];
 }
 
+/** Pays couverts par les sector files IVAO (voir server/sectorfiles.ts) */
+export const SECTOR_FILE_COUNTRIES = new Set(['US', 'CA', 'EC', 'UY']);
+
 /** Procédures publiées dans les tableaux de codage de l'eAIP France (non disponibles ailleurs) */
-async function fetchEaipProcedures(icao: string): Promise<AirportProcedures | null> {
-  if (!/^LF[A-Z]{2}$/.test(icao)) return null;
-  const res = await fetch(`/api/procedures/${icao}`);
+/** Procédures publiées : eAIP France, AIXM du DECEA au Brésil, sector files IVAO dans les autres pays des Amériques */
+async function fetchEaipProcedures(airport: Airport): Promise<AirportProcedures | null> {
+  // Brésil : fichiers générés depuis l'AIXM du DECEA (scripts/build-decea-procedures.ts)
+  if (airport.country === 'BR') {
+    if (!/^[A-Z]{4}$/.test(airport.icao)) return null;
+    const res = await fetch(`/data/procedures/${airport.icao}.json`);
+    return res.ok ? res.json() : null;
+  }
+  // Aérodromes du SIA : métropole et outre-mer (voir server/sia.ts)
+  const ident = /^(LF|TF|SO|FM|NW|NL|NT)[A-Z]{2}$/.test(airport.icao) ? airport.icao : SECTOR_FILE_COUNTRIES.has(airport.country) ? airport.icao || airport.ident : null;
+  if (!ident || !/^[A-Z0-9]{3,4}$/.test(ident)) return null;
+  const res = await fetch(`/api/procedures/${ident}`);
   return res.ok ? res.json() : null;
 }
 
@@ -102,7 +114,7 @@ async function fetchEaipProcedures(icao: string): Promise<AirportProcedures | nu
  * y figure, sinon la procédure est proposée pour toutes les pistes. Repli sur l'eAIP si autorouter n'a rien.
  */
 export async function fetchProcedures(airport: Airport): Promise<AirportProcedures | null> {
-  const eaip = fetchEaipProcedures(airport.icao).catch(() => null);
+  const eaip = fetchEaipProcedures(airport).catch(() => null);
   if (!import.meta.env.DEV) return eaip;
   const res = await fetch(`/dev/autorouter/procedures/${airport.icao}?lon=${airport.lon}&lat=${airport.lat}`).catch(() => null);
   const autorouter: AirportProcedures | null = res?.ok ? await res.json() : null;

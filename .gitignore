@@ -4,3 +4,6 @@ dist
 public/data
 .DS_Store
 .env
+
+# Sector files EuroScope téléchargés à la main (navdata Navigraph, usage personnel : jamais versionnés)
+/sector files/

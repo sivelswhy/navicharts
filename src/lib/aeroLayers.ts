@@ -1,50 +1,61 @@
 // Couches aéronautiques affichées par-dessus le fond de carte : espaces aériens, routes, points de report,
-// balises, pistes et aérodromes.
-import type { ExpressionSpecification, FilterSpecification, LineLayerSpecification, Map as MapLibreMap, SymbolLayerSpecification } from 'maplibre-gl';
+// balises, pistes et aérodromes, ainsi que VFR, MVA et secteurs ATC IVAO (sector files des Amériques).
+import type { ExpressionSpecification, FilterSpecification, GeoJSONSource, LineLayerSpecification, Map as MapLibreMap, SymbolLayerSpecification } from 'maplibre-gl';
 import { AERO_COLORS, NAVAID_ICON, VOR_ROSE } from './aeroIcons.ts';
 import { FONT_BOLD, FONT_REGULAR } from './mapStyle.ts';
 
 export type LayerGroup =
   | 'airspaces'
   | 'airways'
-  | 'autorouter'
-  | 'autorouterAirspaces'
-  | 'autorouterSid'
-  | 'autorouterStar'
-  | 'autorouterPoints'
+  | 'procedures'
   | 'waypoints'
   | 'navaids'
   | 'airports'
   | 'ground'
+  | 'vfr'
+  | 'mva'
   | 'nat'
   | 'ivao';
 
 /** Routes autorouter : test local uniquement, servies par le serveur de dev Vite (voir vite.config.ts) */
 const AUTOROUTER = import.meta.env.DEV;
 
-export const LAYER_GROUP_LABELS: Partial<Record<LayerGroup, string>> = {
-  ...(!AUTOROUTER && { airspaces: 'Espaces aériens (France)' }),
-  // Remplacées pour l'instant par les routes autorouter pendant les tests
-  ...(!AUTOROUTER && { airways: 'Routes RNAV (France)' }),
-  ...(AUTOROUTER && {
-    autorouterAirspaces: 'Espaces aériens autorouter',
-    autorouter: 'Routes autorouter',
-    autorouterSid: 'SID autorouter',
-    autorouterStar: 'STAR autorouter',
-  }),
-  ...(!AUTOROUTER && { waypoints: 'Points de report (France)' }),
-  ...(AUTOROUTER && { autorouterPoints: 'Points de report autorouter' }),
+/**
+ * Couches proposées à l'utilisateur, par thème. Chaque interrupteur regroupe toutes les sources d'un même contenu
+ * (eAIP du SIA et européennes, DECEA, sector files IVAO, autorouter en test local) : la source n'est pas un choix.
+ */
+export const LAYER_SECTIONS: { title: string; groups: LayerGroup[] }[] = [
+  { title: 'Navigation', groups: ['airspaces', 'airways', ...(AUTOROUTER ? (['procedures'] as const) : []), 'waypoints', 'navaids'] },
+  { title: 'Aérodromes', groups: ['airports', 'ground'] },
+  { title: 'VFR et relief', groups: ['vfr', 'mva'] },
+  { title: 'Trafic', groups: ['nat', 'ivao'] },
+];
+
+export const LAYER_GROUP_LABELS: Record<LayerGroup, string> = {
+  airspaces: 'Espaces aériens',
+  airways: 'Routes aériennes',
+  procedures: 'SID et STAR',
+  waypoints: 'Points de report',
   navaids: 'Balises',
   airports: 'Aérodromes',
   ground: 'Plan au sol',
+  vfr: 'Points et routes VFR',
+  mva: 'Altitudes minimales radar (MVA)',
   nat: 'Tracks NAT (Atlantique Nord)',
-  ivao: 'Trafic IVAO (en direct)',
+  ivao: 'Trafic IVAO en direct',
 };
 
 export const LAYER_GROUPS: Record<LayerGroup, string[]> = {
-  airspaces: ['airspace-fill', 'airspace-fir', 'airspace-line', 'airspace-line-e', 'airspace-label'],
-  airways: ['airways', 'airway-labels'],
-  autorouterAirspaces: [
+  airspaces: [
+    'airspace-fill',
+    'airspace-highlight-fill',
+    'airspace-fir',
+    'airspace-line',
+    'airspace-line-e',
+    'airspace-restricted',
+    'airspace-highlight-line',
+    'airspace-label',
+    'airspace-level-labels',
     'autorouter-airspace-fill',
     'autorouter-airspace-band',
     'autorouter-airspace-line',
@@ -52,21 +63,37 @@ export const LAYER_GROUPS: Record<LayerGroup, string[]> = {
     'autorouter-airspace-highlight-line',
     'autorouter-airspace-label',
   ],
-  autorouter: ['autorouter-airways-casing', 'autorouter-airways', 'autorouter-airway-labels'],
-  autorouterSid: ['autorouter-sid-band', 'autorouter-sid', 'autorouter-sid-labels'],
-  autorouterStar: ['autorouter-star-band', 'autorouter-star', 'autorouter-star-labels'],
-  waypoints: ['waypoints'],
-  autorouterPoints: ['autorouter-waypoints'],
+  airways: ['airways', 'airway-labels', 'autorouter-airways-casing', 'autorouter-airways', 'autorouter-airway-labels'],
+  procedures: ['autorouter-sid-band', 'autorouter-sid', 'autorouter-sid-labels', 'autorouter-star-band', 'autorouter-star', 'autorouter-star-labels'],
+  waypoints: ['waypoints', 'autorouter-waypoints'],
   navaids: ['autorouter-vor-rose', 'navaids'],
   airports: ['runways', 'runway-ends', 'airports'],
-  ground: ['ground-apron', 'ground-taxiway', 'ground-taxiway-centerline', 'ground-runway', 'ground-taxiway-labels', 'ground-holding', 'ground-stands'],
+  ground: [
+    'ground-apron',
+    'ground-building',
+    'ground-taxiway',
+    'ground-taxiway-centerline',
+    'ground-pier',
+    'ground-runway',
+    'ground-taxiway-labels',
+    'ground-holding',
+    'ground-stands',
+  ],
+  vfr: ['vfr-routes', 'vfr-points'],
+  mva: ['mva-lines', 'mva-labels'],
   nat: ['nat-tracks', 'nat-track-labels', 'nat-fixes', 'nat-fix-labels', 'nat-track-ends'],
-  ivao: ['ivao-atcs', 'ivao-pilots'],
+  ivao: ['ivao-sectors-fill', 'ivao-sectors-line', 'ivao-atcs', 'ivao-pilots'],
 };
+
+/** Sources lourdes chargées à la première activation de leur groupe */
+const LAZY_SOURCES: Partial<Record<LayerGroup, string[]>> = { mva: ['mva'], ivao: ['ivao-sectors'] };
+const loadedSources = new WeakMap<MapLibreMap, Set<string>>();
 
 /** Sources alimentées par le trafic IVAO (voir MapView) */
 export const IVAO_PILOTS_SOURCE = 'ivao-pilots';
 export const IVAO_ATCS_SOURCE = 'ivao-atcs';
+/** Secteurs des positions ATC (sector files IVAO), filtrés sur les contrôleurs en ligne (voir MapView) */
+export const IVAO_SECTORS_LAYERS = ['ivao-sectors-fill', 'ivao-sectors-line'];
 
 /** Source alimentée avec les tracks NAT en vigueur (voir MapView) */
 export const NAT_SOURCE = 'nat';
@@ -75,8 +102,21 @@ const NAT_COLOR = '#0e7c86';
 /** Source alimentée à la demande avec le plan au sol des aérodromes visibles (voir MapView) */
 export const GROUND_SOURCE = 'ground';
 
-/** Propriétés d'un espace aérien autorouter (ident, name, type, altlower, altupper…) */
+/**
+ * Propriétés d'un espace aérien : autorouter (ident, name, type numérique, altlower, altupper…), ou nos données
+ * (eAIP France, sector files IVAO) marquées `origin: 'local'` (name, type « FIR », « TMA »…, class, lower, upper)
+ */
 export type AirspaceInfo = Record<string, string | number | boolean>;
+
+/** Couches cliquables de nos espaces aériens (le nom d'abord) */
+export const LOCAL_AIRSPACE_LAYERS = ['airspace-label', 'airspace-fir', 'airspace-line', 'airspace-line-e', 'airspace-restricted'];
+
+/** Espace de nos données, repéré comme ceux d'autorouter (voir airspaceKey) */
+export function localAirspace(p: Record<string, unknown>): AirspaceInfo {
+  const info: AirspaceInfo = { origin: 'local', ident: String(p.name ?? ''), altlower: String(p.lower ?? ''), altupper: String(p.upper ?? '') };
+  for (const [k, v] of Object.entries(p)) if (v !== null && v !== undefined && typeof v !== 'object') info[k] = v as string | number | boolean;
+  return info;
+}
 
 /** Un espace est repéré par son identifiant et ses limites verticales (une TMA a plusieurs tranches) */
 export const airspaceKey = (a: AirspaceInfo) => `${a.ident}|${a.altlower}|${a.altupper}`;
@@ -86,8 +126,18 @@ export function highlightAirspace(map: MapLibreMap, airspace: AirspaceInfo | nul
   const f = airspace
     ? filter(['all', ['==', ['get', 'object'], 'airspace'], ['==', ['get', 'ident'], airspace.ident], ['==', ['get', 'altlower'], airspace.altlower], ['==', ['get', 'altupper'], airspace.altupper]])
     : filter(['==', ['get', 'object'], '']);
-  map.setFilter('autorouter-airspace-highlight-fill', f);
-  map.setFilter('autorouter-airspace-highlight-line', f);
+  const local = airspace?.origin === 'local';
+  if (map.getLayer('autorouter-airspace-highlight-fill')) {
+    map.setFilter('autorouter-airspace-highlight-fill', local ? filter(['==', ['get', 'object'], '']) : f);
+    map.setFilter('autorouter-airspace-highlight-line', local ? filter(['==', ['get', 'object'], '']) : f);
+  }
+  if (map.getLayer('airspace-highlight-fill')) {
+    const own = local
+      ? filter(['all', ['==', ['get', 'name'], airspace.name], ['==', ['get', 'type'], airspace.type], ['==', ['coalesce', ['get', 'lower'], ''], airspace.altlower]])
+      : filter(['==', ['get', 'name'], '\u0000']);
+    map.setFilter('airspace-highlight-fill', filter(['all', ['==', ['geometry-type'], 'Polygon'], own]));
+    map.setFilter('airspace-highlight-line', own);
+  }
 }
 
 const HALO = '#ffffff';
@@ -131,6 +181,11 @@ const filter = (e: unknown) => e as FilterSpecification;
 // L'UTA (au-dessus du FL 195) couvre tout le territoire et suit les limites des FIR : elle n'est pas dessinée.
 const CONTROLLED = filter(['all', ['in', ['get', 'type'], ['literal', ['CTA', 'TMA', 'CTR']]], ['!=', ['get', 'class'], 'E']]);
 const CLASS_E = filter(['any', ['==', ['get', 'class'], 'E'], ['==', ['get', 'type'], 'LTA']]);
+/** En dev, seules les données hors d'Europe (sector files IVAO, DECEA, outre-mer du SIA) : l'Europe vient d'autorouter */
+const AMERICAS_DATA = ['any', ['==', ['get', 'ivao'], true], ['in', ['get', 'source'], ['literal', ['DECEA', 'SIA outre-mer']]]];
+const scoped = (f?: FilterSpecification) => (AUTOROUTER ? filter(f ? ['all', AMERICAS_DATA, f] : AMERICAS_DATA) : f);
+// Sans filtre en production : une clé `filter` indéfinie ferait refuser la couche
+const onlyIvaoInDev = AUTOROUTER ? { filter: scoped() } : {};
 
 // Importance d'un aérodrome → zoom à partir duquel il est affiché
 const AIRPORT_VISIBLE = filter([
@@ -153,11 +208,13 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
   map.addSource(IVAO_PILOTS_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addSource(IVAO_ATCS_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addSource(NAT_SOURCE, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+  map.addSource('vfr', { type: 'geojson', data: data('vfr') });
+  for (const id of Object.values(LAZY_SOURCES).flat()) map.addSource(id, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
 
   const add = (layer: Parameters<MapLibreMap['addLayer']>[0]) => map.addLayer(layer, beforeId);
 
-  // Espaces aériens (France), remplacés en dev par ceux d'autorouter (toute l'Europe)
-  if (!AUTOROUTER) {
+  // Espaces aériens (France, sector files IVAO) ; en dev, ceux d'autorouter couvrent l'Europe
+  {
     map.addSource('airspaces', { type: 'geojson', data: data('airspaces') });
     add({
       id: 'airspace-fill',
@@ -165,7 +222,7 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       source: 'airspaces',
       // Les espaces se superposent : le remplissage n'apparaît qu'à l'échelle régionale pour ne pas voiler la carte
       minzoom: 7,
-      filter: CONTROLLED,
+      filter: scoped(CONTROLLED),
       // et s'efface à fort zoom, où l'on est souvent à l'intérieur de plusieurs parties d'une même TMA
       paint: { 'fill-color': '#3b78c4', 'fill-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0, 8, 0.03, 10, 0.03, 11, 0] },
     });
@@ -173,7 +230,7 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       id: 'airspace-fir',
       type: 'line',
       source: 'airspaces',
-      filter: filter(['==', ['get', 'type'], 'FIR']),
+      filter: scoped(filter(['==', ['get', 'type'], 'FIR'])),
       paint: { 'line-color': '#8f8a82', 'line-width': 1.6, 'line-dasharray': [6, 2, 1, 2] },
     });
     add({
@@ -181,7 +238,7 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       type: 'line',
       source: 'airspaces',
       minzoom: 5,
-      filter: CONTROLLED,
+      filter: scoped(CONTROLLED),
       paint: { 'line-color': '#3b78c4', 'line-opacity': 0.75, 'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.6, 10, 1.4] },
     });
     add({
@@ -189,7 +246,7 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       type: 'line',
       source: 'airspaces',
       minzoom: 6,
-      filter: CLASS_E,
+      filter: scoped(CLASS_E),
       paint: { 'line-color': '#b46aa6', 'line-opacity': 0.7, 'line-width': 1, 'line-dasharray': [3, 2] },
     });
     add({
@@ -197,11 +254,18 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       type: 'symbol',
       source: 'airspaces',
       minzoom: 8.5,
-      filter: filter(['in', ['get', 'type'], ['literal', ['CTA', 'TMA', 'CTR', 'LTA']]]),
+      filter: scoped(filter(['in', ['get', 'type'], ['literal', ['CTA', 'TMA', 'CTR', 'LTA']]])),
       layout: {
         'symbol-placement': 'line',
         'symbol-spacing': 400,
-        'text-field': expr(['concat', ['get', 'name'], '  ', ['coalesce', ['get', 'class'], ''], '  ', ['get', 'lower'], '–', ['get', 'upper']]),
+        // Limites verticales absentes des sector files IVAO : affichées à part (étiquettes « LABEL »)
+        'text-field': expr([
+          'concat',
+          ['get', 'name'],
+          '  ',
+          ['coalesce', ['get', 'class'], ''],
+          ['case', ['has', 'lower'], ['concat', '  ', ['get', 'lower'], '–', ['get', 'upper']], ''],
+        ]),
         'text-font': FONT_REGULAR,
         'text-size': 9.5,
         'text-offset': [0, 0.8],
@@ -211,6 +275,39 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
         'text-halo-color': HALO,
         'text-halo-width': 1.5,
       },
+    });
+    // Zones interdites (P), réglementées (R) et dangereuses (D), comme sur les cartes : rouge, orange pour D
+    add({
+      id: 'airspace-restricted',
+      type: 'line',
+      source: 'airspaces',
+      minzoom: 6,
+      filter: scoped(filter(['in', ['get', 'type'], ['literal', ['P', 'R', 'D']]])),
+      paint: {
+        'line-color': expr(['case', ['==', ['get', 'type'], 'D'], AERO_COLORS.danger, AERO_COLORS.restricted]),
+        'line-width': 1.2,
+        'line-opacity': 0.8,
+      },
+    });
+    // Espace mis en évidence (clic sur son nom ou sa bordure)
+    const none = filter(['==', ['get', 'name'], '\u0000']);
+    add({ id: 'airspace-highlight-fill', type: 'fill', source: 'airspaces', filter: none, paint: { 'fill-color': '#3b78c4', 'fill-opacity': 0.12 } });
+    add({
+      id: 'airspace-highlight-line',
+      type: 'line',
+      source: 'airspaces',
+      filter: none,
+      layout: { 'line-join': 'round' },
+      paint: { 'line-color': '#1d4f91', 'line-width': 3 },
+    });
+    add({
+      id: 'airspace-level-labels',
+      type: 'symbol',
+      source: 'airspaces',
+      minzoom: 7.5,
+      filter: filter(['==', ['get', 'type'], 'LABEL']),
+      layout: { 'text-field': ['get', 'text'], 'text-font': FONT_BOLD, 'text-size': 10 },
+      paint: { 'text-color': '#2f64a6', 'text-halo-color': HALO, 'text-halo-width': 1.8 },
     });
   }
 
@@ -312,19 +409,74 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
     });
   }
 
-  // Routes RNAV (masquées pendant les tests des routes autorouter ; route.ts charge ses propres données)
-  if (!AUTOROUTER) {
+  // Altitudes minimales radar (MVA) : contours et altitude en centaines de pieds
+  add({
+    id: 'mva-lines',
+    type: 'line',
+    source: 'mva',
+    minzoom: 6,
+    filter: filter(['!=', ['geometry-type'], 'Point']),
+    paint: { 'line-color': '#8c6d46', 'line-opacity': 0.55, 'line-width': 0.8 },
+  });
+  add({
+    id: 'mva-labels',
+    type: 'symbol',
+    source: 'mva',
+    minzoom: 7.5,
+    filter: filter(['==', ['geometry-type'], 'Point']),
+    layout: { 'text-field': ['get', 'text'], 'text-font': FONT_BOLD, 'text-size': 10 },
+    paint: { 'text-color': '#8c6d46', 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+  });
+
+  // Routes et points VFR (sector files IVAO)
+  add({
+    id: 'vfr-routes',
+    type: 'line',
+    source: 'vfr',
+    minzoom: 8,
+    filter: filter(['==', ['get', 'kind'], 'route']),
+    paint: { 'line-color': AERO_COLORS.vfr, 'line-width': 1.2, 'line-dasharray': [4, 2] },
+  });
+  add({
+    id: 'vfr-points',
+    type: 'symbol',
+    source: 'vfr',
+    minzoom: 8,
+    filter: filter(['==', ['get', 'kind'], 'point']),
+    layout: {
+      'icon-image': 'vrp',
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 8, 0.45, 12, 0.7],
+      'icon-allow-overlap': true,
+      'text-field': expr(['step', ['zoom'], '', 9.5, ['coalesce', ['get', 'name'], ['get', 'ident']]]),
+      'text-font': FONT_REGULAR,
+      'text-size': 9,
+      'text-offset': [0, 0.9],
+      'text-anchor': 'top',
+      'text-optional': true,
+    },
+    paint: { 'text-color': AERO_COLORS.vfr, 'text-halo-color': HALO, 'text-halo-width': 1.5 },
+  });
+
+  // Routes aériennes (en dev, celles d'autorouter couvrent l'Europe ; route.ts charge ses propres données)
+  {
     add({
       id: 'airways',
       type: 'line',
       source: 'airways',
-      minzoom: 5.5,
-      paint: { 'line-color': AERO_COLORS.airway, 'line-width': ['interpolate', ['linear'], ['zoom'], 5.5, 0.6, 10, 1.5] },
+      // Visibles dès l'échelle d'un continent (l'Amérique du Nord entière tient vers le zoom 4)
+      minzoom: 4,
+      ...onlyIvaoInDev,
+      paint: {
+        'line-color': AERO_COLORS.airway,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.4, 10, 1.5],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.5, 7, 1],
+      },
     });
     add({
       id: 'airway-labels',
       type: 'symbol',
       source: 'airways',
+      ...onlyIvaoInDev,
       minzoom: 7.5,
       layout: {
         'symbol-placement': 'line-center',
@@ -483,11 +635,13 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
         'text-halo-width': 1.5,
       },
     });
-  } else add({
+  }
+  add({
     id: 'waypoints',
     type: 'symbol',
     source: 'waypoints',
     minzoom: 7,
+    ...onlyIvaoInDev,
     layout: {
       'icon-image': 'waypoint',
       'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 0.5, 11, 0.8],
@@ -513,6 +667,14 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
     paint: { 'fill-color': '#dedad2', 'fill-outline-color': '#c9c3b8' },
   });
   add({
+    id: 'ground-building',
+    type: 'fill',
+    source: GROUND_SOURCE,
+    minzoom: 13,
+    filter: kind('building'),
+    paint: { 'fill-color': '#c4bcb0', 'fill-outline-color': '#a39a8c' },
+  });
+  add({
     id: 'ground-taxiway',
     type: 'line',
     source: GROUND_SOURCE,
@@ -532,6 +694,14 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
     filter: kind('taxiway'),
     layout: { 'line-cap': 'round', 'line-join': 'round' },
     paint: { 'line-color': '#e8b923', 'line-width': ['interpolate', ['linear'], ['zoom'], 15, 0.6, 18, 2] },
+  });
+  add({
+    id: 'ground-pier',
+    type: 'line',
+    source: GROUND_SOURCE,
+    minzoom: 14,
+    filter: kind('pier'),
+    paint: { 'line-color': '#8a8174', 'line-width': ['interpolate', ['linear'], ['zoom'], 14, 0.8, 18, 3] },
   });
   add({
     id: 'ground-runway',
@@ -739,6 +909,23 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
     paint: { 'text-color': '#ffffff', 'text-halo-color': NAT_COLOR, 'text-halo-width': 4 },
   });
 
+  // Secteurs des contrôleurs IVAO en ligne (filtre mis à jour avec le trafic, voir MapView)
+  const noSector = filter(['in', ['get', 'callsign'], ['literal', []]]);
+  add({
+    id: 'ivao-sectors-fill',
+    type: 'fill',
+    source: 'ivao-sectors',
+    filter: noSector,
+    paint: { 'fill-color': '#1e3a8a', 'fill-opacity': 0.06 },
+  });
+  add({
+    id: 'ivao-sectors-line',
+    type: 'line',
+    source: 'ivao-sectors',
+    filter: noSector,
+    paint: { 'line-color': '#1e3a8a', 'line-opacity': 0.6, 'line-width': 1.2 },
+  });
+
   // Trafic IVAO : contrôleurs (position de leur secteur) et avions orientés selon leur cap
   add({
     id: 'ivao-atcs',
@@ -843,6 +1030,15 @@ export function setGroupVisibility(map: MapLibreMap, visible: Record<LayerGroup,
   for (const [group, layers] of Object.entries(LAYER_GROUPS) as [LayerGroup, string[]][]) {
     for (const id of layers) {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible[group] ? 'visible' : 'none');
+    }
+    // Fichiers lourds chargés seulement quand le groupe est affiché
+    if (!visible[group]) continue;
+    const loaded = loadedSources.get(map) ?? new Set<string>();
+    loadedSources.set(map, loaded);
+    for (const id of LAZY_SOURCES[group] ?? []) {
+      if (loaded.has(id)) continue;
+      loaded.add(id);
+      (map.getSource(id) as GeoJSONSource | undefined)?.setData(`/data/${id}.geojson`);
     }
   }
 }
