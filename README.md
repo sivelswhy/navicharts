@@ -1,7 +1,7 @@
 # NaviCharts
 
 Alternative gratuite à Navigraph pour la simulation de vol, couvrant l'**Europe**, l'**outre-mer français**, une
-partie des **Amériques** et une grande partie de l'**Asie**, construite à partir de données publiques (et, là où il
+partie des **Amériques**, l'**Afrique du Nord**, la **Russie**, une grande partie de l'**Asie** et l'**Australie**, construite à partir de données publiques (et, là où il
 n'y en a pas, des sector files de la communauté IVAO).
 
 | Pays | Cartes officielles | Espaces, routes, points | SID, STAR, approches |
@@ -15,6 +15,8 @@ n'y en a pas, des sector files de la communauté IVAO).
 | Corée du Sud, Taïwan, Thaïlande, Israël | eAIP nationales (AD 2.24) | Routes et points : eAIP ENR 3.1–3.3, 4.4 | Thaïlande : sector files IVAO |
 | Japon, Singapour, Indonésie | — | Sector files IVAO | Sector files IVAO |
 | Chine, Hong Kong, Inde, Asie du Sud-Est, Asie centrale, Moyen-Orient (44 FIR) | — | Sector files Aurora | Sector files Aurora |
+| Allemagne, Pays-Bas, Suisse, Autriche, Italie, Espagne, Portugal, Pologne, Tchéquie, Slovaquie, Hongrie, Roumanie, Bulgarie, Grèce, Chypre, Malte, Croatie, Slovénie, Bosnie-Herzégovine, Serbie, Macédoine du Nord, Albanie, Moldavie, Ukraine, Biélorussie, Turquie | — | Sector files Aurora | Sector files Aurora |
+| Russie, Algérie, Tunisie, Maroc, Égypte, Australie | — | Sector files Aurora | Sector files Aurora |
 | Autres pays d'Europe | — (aérodromes, pistes, fréquences, balises et plan au sol uniquement) | — | — |
 
 ## Démarrage
@@ -38,7 +40,7 @@ Production : `npm run build && npm start` (port 4173, modifiable via `PORT`).
 | Brésil : routes, points, balises, espaces aériens | DECEA, [GeoAISWEB](https://geoaisweb.decea.mil.br) (WFS public, cache 1 jour dans `.cache/decea`) | Données publiques du DECEA |
 | Brésil : SID, STAR, approches | DECEA, [jeu AIXM complet](https://aisweb.decea.gov.br/?i=publicacoes&p=aixm) de l'amendement en vigueur (zip de ~55 Mo lu en flux) | Données publiques du DECEA |
 | États-Unis, Canada, Équateur, Uruguay, Japon, Singapour, Indonésie, Thaïlande : navdata, espaces, VFR, MVA, secteurs ATC, procédures, plans au sol | Sector files Aurora des divisions IVAO : [US](https://github.com/IVAO-US/SectorFiles), [Canada](https://github.com/IVAO-Canada/SectorFiles), [Équateur](https://github.com/IVAO-Ecuador/IVAO-SectorFile), [Uruguay](https://github.com/Miguel22247/Aurora-Sector-File), [Japon](https://github.com/NightFalconS/RJJJ-AuroraSectorFile), [Singapour](https://github.com/NightFalconS/WSJCAuroraSectorFile), [Indonésie](https://github.com/IVAOID/ID-Sectorfile), [Thaïlande](https://github.com/ivaoth/sector-file) (cache 1 jour dans `.cache/sectorfiles`) | Canada, Indonésie : GPL-3.0 ; autres : sans licence (US : navdata « Keyvan Aviation ») — réservé à la simulation |
-| Asie (Chine, Hong Kong, Inde, Asie du Sud-Est, Asie centrale, Moyen-Orient) : mêmes données | Cache JSON d'Aurora, dépôt [navicharts-sector-files](https://github.com/sivelswhy/navicharts-sector-files) (clone superficiel dans `.cache/aurora`, mis à jour une fois par jour) | Données des divisions IVAO — réservé à la simulation |
+| Europe (hors pays à eAIP), Russie, Afrique du Nord, Moyen-Orient, Asie, Australie : mêmes données (les eAIP font foi là où elles existent) | Cache JSON d'Aurora, dépôt [navicharts-sector-files](https://github.com/sivelswhy/navicharts-sector-files) (clone superficiel dans `.cache/aurora`, mis à jour une fois par jour) | Données des divisions IVAO — réservé à la simulation |
 | Cartes et routes : Corée du Sud, Taïwan, Thaïlande, Israël | eAIP nationales (KOCA, CAA Taïwan, CAAT, CAAI) | © services nationaux |
 | Cartes VAC | Atlas VAC, SIA | © SIA/DGAC |
 | NOTAM | [SOFIA-Briefing](https://sofia-briefing.aviation-civile.gouv.fr), SIA/DGAC (bulletin d'aérodrome, sans compte, cache 10 min) | Licence Ouverte Etalab 2.0 |
@@ -81,6 +83,7 @@ redistribuées. Le build de production n'utilise pas autorouter.
 - `scripts/build-eaip-enr.ts` : routes et points des eAIP européens au format Eurocontrol (Royaume-Uni, Estonie)
 - `scripts/build-ivao.ts` : données statiques des sector files IVAO (routes, balises, aérodromes, pistes, fréquences ATC, VFR, espaces, zones P/R/D, MVA, secteurs ATC)
 - `scripts/build-aurora.ts` : mêmes données, depuis le cache JSON d'Aurora (dépôt `navicharts-sector-files`)
+- `scripts/import-aurora.ts` (`npm run import-aurora`) : ajout de sector files exportés d'Aurora au dépôt de données (`sector files/aurora/`) : extraction des `.zip`, plans au sol précalculés (`ground_<OACI>.json`), tuiles inutiles retirées
 - `scripts/build-decea.ts` : couches GeoAISWEB du DECEA (Brésil)
 - `scripts/build-decea-procedures.ts` : SID, STAR et approches du jeu AIXM du DECEA → `public/data/procedures/<OACI>.json`
 - `src/lib/mapStyle.ts`, `aeroIcons.ts`, `aeroLayers.ts` : fond de carte clair, symboles OACI et couches aéronautiques

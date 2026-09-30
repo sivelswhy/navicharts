@@ -2,8 +2,10 @@
 // https://github.com/sivelswhy/navicharts-sector-files et clonés dans `.cache/aurora` (voir syncAurora). Un dossier par
 // sector file :
 //   global.json          aérodromes (pistes, postes), points et balises, routes hautes et basses, positions ATC
-//   section_NNN_X_Y.json tuiles (niveau de zoom, x, y) : contours, surfaces au sol, taxiways, postes, espaces, MVA
+//   section_NNN_X_Y.json tuiles (niveau de zoom, x, y) : contours, surfaces au sol, taxiways, postes, espaces, MVA ;
+//                        niveaux 0 à 6 seulement, les suivants étant remplacés par ground_<OACI>.json à l'import
 //   proc_<OACI>.json     procédures d'un aérodrome, telles qu'Aurora les dessine
+//   ground_<OACI>.json   plan au sol d'un aérodrome, précalculé par scripts/import-aurora.ts
 // Les positions (`mapPosition`, `mapPoints`) sont en Web Mercator normalisé [0, 1] ; `geoPosition` : x = lat, y = lon.
 // Les procédures ne nomment pas leurs points : chaque sommet est rapproché du point nommé situé exactement au même endroit.
 import { execFile } from 'node:child_process';
@@ -348,23 +350,25 @@ function isGray(color: string | null): boolean {
   return Math.max(r, g, b) - Math.min(r, g, b) < 24 && r > 40 && r < 200;
 }
 
-export async function getAuroraGround(icao: string): Promise<GroundFeature[] | null> {
-  const folder = await folderOf(async (f) => Boolean((await auroraGlobal(f).catch(() => null))?.airports?.[icao]));
-  if (!folder) return null;
-  const airport = (await auroraGlobal(folder)).airports[icao];
-  const at = airport.mapPosition;
-  // Tuiles du niveau le plus détaillé autour de l'aérodrome (~6 km)
-  const margin = 6 / 40075 / Math.cos((airport.geoPosition.x * Math.PI) / 180);
-  const sections = (await auroraSections(folder, (level) => level >= 8)).filter(
-    (s) => s.mapBounds.minX <= at.x + margin && s.mapBounds.maxX >= at.x - margin && s.mapBounds.minY <= at.y + margin && s.mapBounds.maxY >= at.y - margin,
-  );
-  const inside = (p: MapPoint) => Math.abs(p.x - at.x) < margin && Math.abs(p.y - at.y) < margin;
+/** Premier niveau de tuiles lu pour le plan au sol ; le script d'import retire les tuiles plus détaillées que la carte */
+export const GROUND_LEVEL = 8;
 
+/**
+ * Plan au sol d'un aérodrome, assemblé tuile par tuile (`add`) à partir des tuiles les plus détaillées situées à moins de
+ * ~6 km ; les postes (dans global.json) n'en font pas partie. Sert au script d'import, qui l'enregistre dans
+ * `ground_<OACI>.json`, et au serveur pour un dossier qui n'est pas passé par l'import.
+ */
+export function groundCollector(icao: string, airport: AuroraAirport) {
+  const at = airport.mapPosition;
+  const margin = 6 / 40075 / Math.cos((airport.geoPosition.x * Math.PI) / 180);
+  const inside = (p: MapPoint) => Math.abs(p.x - at.x) < margin && Math.abs(p.y - at.y) < margin;
   const features: GroundFeature[] = [];
   const seen = new Set<string>();
   const once = (k: string) => !seen.has(k) && Boolean(seen.add(k));
-  for (const s of sections) {
-    for (const shape of s.shapes) {
+  const add = (s: AuroraSection) => {
+    const b = s.mapBounds;
+    if (b.minX > at.x + margin || b.maxX < at.x - margin || b.minY > at.y + margin || b.maxY < at.y - margin) return;
+    for (const shape of s.shapes ?? []) {
       const points = shape.mapPoints.filter(Boolean);
       if (points.length < 2 || !points.some(inside)) continue;
       const coords = points.map(fromMap);
@@ -384,13 +388,34 @@ export async function getAuroraGround(icao: string): Promise<GroundFeature[] | n
       }
     }
     // Pas d'axes de taxiway dans ce format : seulement leurs étiquettes
-    for (const t of s.taxiways) {
+    for (const t of s.taxiways ?? []) {
       if (t.airport !== icao || !once(`twy ${t.text} ${key(t.mapPosition)}`)) continue;
       features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: fromMap(t.mapPosition) }, properties: { kind: 'taxiway-label', ref: t.text } });
     }
+  };
+  return { add, features };
+}
+
+export async function getAuroraGround(icao: string): Promise<GroundFeature[] | null> {
+  // Plusieurs sector files citent l'aérodrome (FIR voisines) : celui qui en contient le plan au sol d'abord
+  const folder =
+    (await folderOf(async (f) => existsSync(path.join(AURORA_ROOT, f, `ground_${icao}.json`)))) ??
+    (await folderOf(async (f) => Boolean((await auroraGlobal(f).catch(() => null))?.airports?.[icao])));
+  if (!folder) return null;
+  const airport = (await auroraGlobal(folder)).airports[icao];
+  const packed = path.join(AURORA_ROOT, folder, `ground_${icao}.json`);
+  let features: GroundFeature[];
+  if (existsSync(packed)) {
+    features = JSON.parse(await readFile(packed, 'utf8')) as GroundFeature[];
+  } else {
+    const ground = groundCollector(icao, airport);
+    for (const s of await auroraSections(folder, (level) => level >= GROUND_LEVEL)) ground.add(s);
+    features = ground.features;
   }
-  for (const g of airport.gates) {
-    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: fromMap(g.mapPosition) }, properties: { kind: 'stand', ref: g.identifier } });
-  }
-  return features;
+  const stands: GroundFeature[] = (airport.gates ?? []).map((g) => ({
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: fromMap(g.mapPosition) },
+    properties: { kind: 'stand', ref: g.identifier },
+  }));
+  return [...features, ...stands];
 }

@@ -6,6 +6,7 @@
   "description": "Alternative gratuite à Navigraph basée sur les données aéronautiques publiques",
   "scripts": {
     "data": "node scripts/build-data.ts",
+    "import-aurora": "node scripts/import-aurora.ts",
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "start": "node server/index.ts",
