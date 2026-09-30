@@ -65,6 +65,8 @@ interface Props {
   layers: Record<LayerGroup, boolean>;
   /** Trajet du plan de vol (segments et points) */
   route: FeatureCollection | null;
+  /** Partie du vol à cadrer au prochain tracé (choix d'une SID, d'une STAR ou d'une approche) ; nouvel objet par demande */
+  routeFocus: { phase: 'departure' | 'arrival' } | null;
   /** Point sur lequel centrer la carte (nouvel objet à chaque demande), repéré sur la carte s'il a un nom */
   focus: { lngLat: LngLat; label?: string } | null;
   /** Trafic IVAO (avions et contrôleurs) */
@@ -131,6 +133,7 @@ export function MapView({
   controlPoints,
   layers,
   route,
+  routeFocus,
   focus,
   traffic,
   nat,
@@ -703,13 +706,29 @@ export function MapView({
     }
   }, [overlay, ready]);
 
-  // Trajet du plan de vol : mise à jour et cadrage sur l'ensemble du vol
+  // Trajet du plan de vol : mise à jour, et cadrage sur l'ensemble du vol seulement pour un nouveau vol (départ ou
+  // arrivée changés) : un choix de piste, de procédure ou d'approche garde le cadrage en cours
+  const fittedFlight = useRef<string | null>(null);
+  const fittedFocus = useRef<{ phase: 'departure' | 'arrival' } | null>(null);
   useEffect(() => {
     const m = map.current;
     if (!m || !ready) return;
     (m.getSource('route') as GeoJSONSource).setData(route ?? EMPTY);
-    const coords = (route?.features ?? []).filter((f) => f.geometry.type === 'Point').map((f) => (f.geometry as Point).coordinates as LngLat);
-    if (coords.length >= 2) m.fitBounds(boundsOf(coords), { padding: 60, duration: 800, bearing: m.getBearing() });
+    const points = (route?.features ?? []).filter((f) => f.geometry.type === 'Point');
+    const coords = points.map((f) => (f.geometry as Point).coordinates as LngLat);
+    // « LFPG 27L » → LFPG : l'aérodrome, sans la piste
+    const flight = points.length >= 2 ? [points[0], points.at(-1)!].map((f) => String(f.properties?.ident ?? '').split(' ')[0]).join('–') : null;
+    if (coords.length >= 2 && flight !== fittedFlight.current) m.fitBounds(boundsOf(coords), { padding: 60, duration: 800, bearing: m.getBearing() });
+    else if (routeFocus && routeFocus !== fittedFocus.current) {
+      // Procédure choisie : cadrage sur le départ ou l'arrivée (STAR, approche, attente)
+      const part = (route?.features ?? [])
+        .filter((f) => f.properties?.phase === routeFocus.phase)
+        .flatMap((f) => (f.geometry.type === 'Point' ? [f.geometry.coordinates as LngLat] : f.geometry.type === 'LineString' ? (f.geometry.coordinates as LngLat[]) : []));
+      if (part.length >= 2) m.fitBounds(boundsOf(part), { padding: 80, maxZoom: 11, duration: 800, bearing: m.getBearing() });
+    }
+    fittedFocus.current = routeFocus;
+    fittedFlight.current = flight;
+    // Le cadrage demandé ne vaut que pour le tracé qui suit : routeFocus n'est volontairement pas une dépendance
   }, [route, ready]);
 
   useEffect(() => {

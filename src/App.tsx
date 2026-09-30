@@ -110,6 +110,8 @@ export function App() {
   const [flightRoute, setFlightRoute] = useState<FlightRoute | null>(null);
   // Approche choisie dans le panneau de vol (le texte de la route ne la mentionne pas)
   const approachRef = useRef<string | null>(null);
+  // Partie du vol à cadrer après un choix de procédure dans le panneau (nouvel objet par choix)
+  const [routeFocus, setRouteFocus] = useState<{ phase: 'departure' | 'arrival' } | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lngLat: LngLat; label?: string } | null>(null);
   // SID et STAR choisies dans la fiche de l'aérodrome, tracées sur la carte
   const [procedureFeatures, setProcedureFeatures] = useState<FeatureCollection | null>(null);
@@ -203,6 +205,9 @@ export function App() {
     (change: RouteChange) => {
       if (!flightRoute) return;
       if (change.approach !== undefined) approachRef.current = change.approach;
+      const arrival = change.star !== undefined || change.approach !== undefined || change.arrivalRunway !== undefined;
+      const departure = change.sid !== undefined || change.departureRunway !== undefined;
+      if (arrival || departure) setRouteFocus({ phase: arrival ? 'arrival' : 'departure' });
       const text = editRoute(routeText, flightRoute, change);
       setRouteText(text);
       traceRoute(text);
@@ -512,6 +517,7 @@ export function App() {
             controlPoints={controlPoints}
             layers={layers}
             route={routeFeatures}
+            routeFocus={routeFocus}
             focus={mapFocus}
             traffic={trafficFeatures}
             nat={nat.geojson}
