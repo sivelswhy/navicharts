@@ -81,6 +81,9 @@ export async function buildAurora(): Promise<Omit<IvaoData, 'divisions' | 'vfr'>
       continue;
     }
     result.folders.push(folder);
+    // Brésil (dossiers « SB… ») : routes, points, balises et espaces marqués, le DECEA restant la référence (build-data.ts)
+    const brazil = folder.startsWith('SB');
+    const before = { airways: result.airways.length, waypoints: result.waypoints.length, navaids: result.navaids.length, airspaces: result.airspaces.length };
 
     // Points et balises
     const named = new Map<string, { ident: string; kind: string }>();
@@ -200,6 +203,9 @@ export async function buildAurora(): Promise<Omit<IvaoData, 'divisions' | 'vfr'>
           if (once(`mval ${m.identifier} ${key(l.mapPosition)}`)) result.mva.push(point(fromMap(l.mapPosition), { facility: m.airport, text: String(Number(m.identifier)) }));
         }
       }
+    }
+    if (brazil) {
+      for (const k of ['airways', 'waypoints', 'navaids', 'airspaces'] as const) for (const f of result[k].slice(before[k])) f.properties.brazil = true;
     }
   }
   console.log(

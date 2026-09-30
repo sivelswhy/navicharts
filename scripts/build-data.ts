@@ -359,7 +359,9 @@ async function main() {
         },
       };
     });
-  const navaidFeatures = [...aipNavaids, ...ourNavaids, ...(ivao?.navaids ?? []), ...(decea?.navaids ?? [])];
+  // Brésil : le DECEA fait foi pour les routes, points, balises et espaces ; les sector files Aurora ne s'ajoutent qu'à défaut
+  const notBrazil = (f: { properties: Record<string, unknown> }) => !decea || !f.properties.brazil;
+  const navaidFeatures = [...aipNavaids, ...ourNavaids, ...(ivao?.navaids.filter(notBrazil) ?? []), ...(decea?.navaids ?? [])];
   const collection = (list: unknown[]) => JSON.stringify({ type: 'FeatureCollection', features: list });
 
   await writeFile(path.join(OUT_DIR, 'airports.geojson'), JSON.stringify({ type: 'FeatureCollection', features }));
@@ -372,11 +374,11 @@ async function main() {
   await writeFile(path.join(OUT_DIR, 'navaids.geojson'), collection(navaidFeatures));
   await writeFile(path.join(OUT_DIR, 'runways.geojson'), collection(runwayFeatures));
   await writeFile(path.join(OUT_DIR, 'runway-ends.geojson'), collection(runwayEndFeatures));
-  const waypointFeatures = [...(aip?.waypoints ?? []), ...enr.waypoints, ...(ivao?.waypoints ?? []), ...(decea?.waypoints ?? [])];
-  const airwayFeatures = [...(aip?.airways ?? []), ...enr.airways, ...(ivao?.airways ?? []), ...(decea?.airways ?? [])];
+  const waypointFeatures = [...(aip?.waypoints ?? []), ...enr.waypoints, ...(ivao?.waypoints.filter(notBrazil) ?? []), ...(decea?.waypoints ?? [])];
+  const airwayFeatures = [...(aip?.airways ?? []), ...enr.airways, ...(ivao?.airways.filter(notBrazil) ?? []), ...(decea?.airways ?? [])];
   await writeFile(path.join(OUT_DIR, 'waypoints.geojson'), collection(waypointFeatures));
   await writeFile(path.join(OUT_DIR, 'airways.geojson'), collection(airwayFeatures));
-  await writeFile(path.join(OUT_DIR, 'airspaces.geojson'), collection([...(aip?.airspaces ?? []), ...(ivao?.airspaces ?? []), ...(decea?.airspaces ?? [])]));
+  await writeFile(path.join(OUT_DIR, 'airspaces.geojson'), collection([...(aip?.airspaces ?? []), ...(ivao?.airspaces.filter(notBrazil) ?? []), ...(decea?.airspaces ?? [])]));
   await writeFile(path.join(OUT_DIR, 'vfr.geojson'), collection(ivao?.vfr ?? []));
   await writeFile(path.join(OUT_DIR, 'mva.geojson'), collection(ivao?.mva ?? []));
   await writeFile(path.join(OUT_DIR, 'ivao-sectors.geojson'), collection(ivao?.sectors ?? []));

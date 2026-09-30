@@ -96,10 +96,18 @@ export const SECTOR_FILE_COUNTRIES = new Set(['US', 'CA', 'EC', 'UY', 'JP', 'SG'
 /** Procédures publiées : eAIP France, AIXM du DECEA au Brésil, sector files IVAO dans les autres pays des Amériques */
 async function fetchEaipProcedures(airport: Airport): Promise<AirportProcedures | null> {
   // Brésil : fichiers générés depuis l'AIXM du DECEA (scripts/build-decea-procedures.ts)
-  if (airport.country === 'BR') {
-    if (!/^[A-Z]{4}$/.test(airport.icao)) return null;
+  // (à défaut, sector files Aurora via l'API ci-dessous)
+  if (airport.country === 'BR' && /^[A-Z]{4}$/.test(airport.icao)) {
     const res = await fetch(`/data/procedures/${airport.icao}.json`);
-    return res.ok ? res.json() : null;
+    // Fichier absent : le serveur peut répondre la page de l'application (200, HTML)
+    if (res.ok && res.headers.get('content-type')?.includes('json')) {
+      const decea: AirportProcedures = await res.json();
+      if (decea.approaches?.length) return decea;
+      // Approches absentes de l'AIXM du DECEA : celles des sector files Aurora, s'il y en a
+      const other = await fetch(`/api/procedures/${airport.icao}`).then((r) => (r.ok ? (r.json() as Promise<AirportProcedures>) : null), () => null);
+      if (!other?.approaches?.length) return decea;
+      return { ...decea, approaches: other.approaches, waypoints: { ...other.waypoints, ...decea.waypoints } };
+    }
   }
   // Aérodromes du SIA : métropole et outre-mer (voir server/sia.ts)
   // Tout aérodrome doté d'un code OACI (le serveur répond 404 sans procédures) ; sans code, les petits terrains couverts
