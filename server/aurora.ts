@@ -12,7 +12,7 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import type { GroundFeature } from './ground.ts';
-import type { AirportProcedures, Approach, Procedure } from './procedures.ts';
+import type { AirportProcedures, Approach, Hold, Procedure } from './procedures.ts';
 import { approachName } from './sectorfiles.ts';
 
 type LngLat = [number, number];
@@ -214,8 +214,16 @@ export async function getAuroraProcedures(icao: string): Promise<AirportProcedur
     return a;
   };
 
+  // Circuits d'attente dessinés (« LIMES HOLD ») : rattachés ensuite aux approches qui passent par leur point
+  const holds: Hold[] = [];
   for (const p of procs) {
     const text = p.identifier.text.trim();
+    if (p.procType === 2) {
+      const fix = text.split(/\s+/)[0];
+      const path = p.mapPoints.filter((m): m is MapPoint => Boolean(m)).map(fromMap);
+      if (fix && path.length >= 3 && !holds.some((h) => h.fix === fix)) holds.push({ fix, path });
+      continue;
+    }
     const fixes = fixesOf(p);
     if (p.procType === -2 || p.procType === -1) {
       // Les seuils ne font pas partie des points d'une SID ou d'une STAR
@@ -307,6 +315,12 @@ export async function getAuroraProcedures(icao: string): Promise<AirportProcedur
         const join = b.fixes.findIndex((f, i) => i > 0 && a.final.includes(f));
         return join > 0 ? { iaf: b.iaf, fixes: b.fixes.slice(0, join + 1) } : b;
       });
+  }
+  for (const a of approaches.values()) {
+    // Attente au bout de l'approche interrompue, sinon sur un point de l'approche (IAF…)
+    const points = new Set([...a.missed, ...a.initial.flatMap((b) => b.fixes), ...a.final]);
+    const own = holds.filter((h) => h.fix === a.missed.at(-1) || points.has(h.fix));
+    if (own.length) a.holds = own;
   }
   return {
     icao,

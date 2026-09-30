@@ -8,6 +8,7 @@ import type { FeatureCollection } from 'geojson';
 import { loadAirports, loadDetails } from './data.ts';
 import type { LngLat } from './georef.ts';
 import type { Airport } from './types.ts';
+import { holdPath, type Hold } from './holds.ts';
 
 export type PointKind = 'airport' | 'runway' | 'waypoint' | 'navaid' | 'coordinates';
 
@@ -66,6 +67,8 @@ export interface FlightRoute {
   approach: string | null;
   approachUsed: Approach | null;
   approachOptions: Approach[];
+  /** Circuits d'attente de l'approche choisie, tracés */
+  holds: { fix: string; path: LngLat[] }[];
 }
 
 // ───────── SID et STAR ─────────
@@ -85,6 +88,22 @@ export interface Approach {
   initial: { iaf: string; fixes: string[] }[];
   final: string[];
   missed: string[];
+  /** Circuits d'attente (approche interrompue…) */
+  holds?: Hold[];
+}
+
+// Pays couverts par le CIFP de la FAA (États-Unis et territoires) : attentes des approches (scripts/build-cifp.ts)
+const CIFP_COUNTRIES = new Set(['US', 'PR', 'VI', 'GU', 'AS', 'MP']);
+
+/** Attentes du CIFP ajoutées aux approches qui n'en ont pas (les sector files IVAO américains ne les décrivent pas) */
+async function withCifpHolds(airport: Airport, data: AirportProcedures | null): Promise<AirportProcedures | null> {
+  if (!data?.approaches?.length || !CIFP_COUNTRIES.has(airport.country) || !/^[A-Z0-9]{4}$/.test(airport.icao)) return data;
+  const res = await fetch(`/data/holds/${airport.icao}.json`).catch(() => null);
+  // Fichier absent : le serveur peut répondre la page de l'application (200, HTML)
+  if (!res?.ok || !res.headers.get('content-type')?.includes('json')) return data;
+  const holds: Record<string, Hold[]> = await res.json();
+  for (const a of data.approaches) a.holds ??= holds[`${a.name} ${a.runway}`];
+  return data;
 }
 
 export interface AirportProcedures {
@@ -128,7 +147,9 @@ async function fetchEaipProcedures(airport: Airport): Promise<AirportProcedures 
  * y figure, sinon la procédure est proposée pour toutes les pistes. Repli sur l'eAIP si autorouter n'a rien.
  */
 export async function fetchProcedures(airport: Airport): Promise<AirportProcedures | null> {
-  const eaip = fetchEaipProcedures(airport).catch(() => null);
+  const eaip = fetchEaipProcedures(airport)
+    .then((data) => withCifpHolds(airport, data))
+    .catch(() => null);
   if (!import.meta.env.DEV) return eaip;
   const res = await fetch(`/dev/autorouter/procedures/${airport.icao}?lon=${airport.lon}&lat=${airport.lat}`).catch(() => null);
   const autorouter: AirportProcedures | null = res?.ok ? await res.json() : null;
@@ -451,6 +472,7 @@ export async function parseRoute(text: string, options: { approach?: string | nu
     approach: options.approach ?? null,
     approachUsed: null,
     approachOptions: [],
+    holds: [],
   };
 
   const points: { point: RoutePoint; via: string }[] = [];
@@ -629,6 +651,12 @@ export async function parseRoute(text: string, options: { approach?: string | nu
       sequence.push({ point, via: approachLabel, style: 'procedure', phase: 'arrival' });
     }
     sequence.push({ point: end, via: approachLabel, style: 'procedure', phase: 'arrival' });
+    // Circuits d'attente de l'approche (au bout de l'approche interrompue, en général)
+    for (const h of approach.holds ?? []) {
+      const at = h.lngLat ?? arrProcedures.waypoints[h.fix] ?? h.path?.[0] ?? procedurePoints([h.fix], arrProcedures, end.lngLat)[0]?.lngLat;
+      const path = at ? holdPath(h, at) : null;
+      if (path) route.holds.push({ fix: h.fix, path });
+    }
     return true;
   };
 
@@ -800,6 +828,12 @@ export function routeGeoJson(route: FlightRoute): FeatureCollection {
         type: 'Feature' as const,
         geometry: { type: 'Point' as const, coordinates: point.lngLat },
         properties: { ident: point.ident, kind: point.kind, phase },
+      })),
+      // Circuits d'attente de l'approche choisie
+      ...route.holds.map((h) => ({
+        type: 'Feature' as const,
+        geometry: { type: 'LineString' as const, coordinates: h.path },
+        properties: { style: 'hold', phase: 'arrival', label: `Attente ${h.fix}` },
       })),
     ],
   };

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { buildAip } from './build-aip.ts';
 import { buildEaipEnr } from './build-eaip-enr.ts';
 import { buildDecea } from './build-decea.ts';
+import { buildCifp } from './build-cifp.ts';
 import { buildDeceaProcedures } from './build-decea-procedures.ts';
 import { buildIvao, type IvaoData } from './build-ivao.ts';
 
@@ -194,7 +195,7 @@ async function main() {
   await mkdir(CACHE_DIR, { recursive: true });
   await mkdir(OUT_DIR, { recursive: true });
 
-  const [airports, ourRunways, ourFrequencies, navaids, aip, enr, ivao, decea, deceaProcedures] = await Promise.all([
+  const [airports, ourRunways, ourFrequencies, navaids, aip, enr, ivao, decea, deceaProcedures, cifp] = await Promise.all([
     loadCsv('airports'),
     loadCsv('runways'),
     loadCsv('airport-frequencies'),
@@ -217,6 +218,10 @@ async function main() {
     }),
     buildDeceaProcedures().catch((err) => {
       console.warn(`⚠ AIXM du DECEA indisponible (${err.message}) : procédures du Brésil non générées`);
+      return null;
+    }),
+    buildCifp().catch((err) => {
+      console.warn(`⚠ CIFP de la FAA indisponible (${err.message}) : attentes des États-Unis non générées`);
       return null;
     }),
   ]);
@@ -394,6 +399,7 @@ async function main() {
         ...(ivao?.divisions ?? []).map((d) => `Sector files IVAO ${d}`),
         ...(decea ? ['DECEA (GeoAISWEB), Brésil'] : []),
         ...(deceaProcedures ? [`DECEA (AIXM ${deceaProcedures.amendment}), procédures du Brésil`] : []),
+        ...(cifp ? [`FAA (${cifp.edition}), circuits d'attente des États-Unis`] : []),
       ],
     }),
   );

@@ -27,6 +27,24 @@ export interface Approach {
   final: string[];
   /** Approche interrompue, après le seuil */
   missed: string[];
+  /** Circuits d'attente (approche interrompue, attente en lieu de virage conventionnel) */
+  holds?: Hold[];
+}
+
+/**
+ * Circuit d'attente sur un point : cap d'entrée (vrai), sens du virage et longueur des branches (NM ou minutes),
+ * ou tracé déjà dessiné par la source (sector files Aurora)
+ */
+export interface Hold {
+  fix: string;
+  /** Branche ARINC 424 : HM (jusqu'à nouvel ordre), HA (jusqu'à une altitude), HF (un tour, en lieu de virage conventionnel) */
+  kind?: 'HM' | 'HA' | 'HF';
+  lngLat?: [number, number];
+  courseT?: number;
+  turn?: 'L' | 'R';
+  legNm?: number;
+  legMin?: number;
+  path?: [number, number][];
 }
 
 export interface AirportProcedures {

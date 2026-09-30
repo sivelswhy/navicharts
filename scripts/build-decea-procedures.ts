@@ -12,7 +12,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
-import type { AirportProcedures, Approach, Procedure } from '../server/procedures.ts';
+import type { AirportProcedures, Approach, Hold, Procedure } from '../server/procedures.ts';
 
 type LngLat = [number, number];
 
@@ -83,6 +83,9 @@ async function readAixm(zip: string) {
   const runwayDirections = new Map<string, string>();
   const centrelinePoints = new Map<string, string>();
   const legs = new Map<string, string | null>();
+  // Branches d'attente (HM, HA, HF) : cap, sens du virage, durée ou longueur
+  const holdLegs = new Map<string, { type: string; course: number; courseType: string; turn: string; minutes: number | null; nm: number | null }>();
+  const magvar = new Map<string, number>();
   const procedures: RawProcedure[] = [];
 
   const unzip = spawn('unzip', ['-p', zip, 'BL_.xml']);
@@ -98,6 +101,7 @@ async function readAixm(zip: string) {
   let seq = 0;
   let where: 'start' | 'end' | null = null;
   let legPoint: { start: string | null; end: string | null } = { start: null, end: null };
+  let leg: Record<string, string> = {};
 
   for await (const line of lines) {
     if (skipping) {
@@ -118,6 +122,7 @@ async function readAixm(zip: string) {
       transition = null;
       where = null;
       legPoint = { start: null, end: null };
+      leg = {};
       procedure = PROCEDURES[feature.type] ? { kind: PROCEDURES[feature.type], name: '', airport: '', transitions: [] } : null;
       continue;
     }
@@ -125,11 +130,26 @@ async function readAixm(zip: string) {
 
     if (line.startsWith(`        </aixm:${feature.type}>`)) {
       const { type, uuid } = feature;
-      if (type === 'AirportHeliport' && designator) airports.set(uuid, designator);
+      if (type === 'AirportHeliport' && designator) {
+        airports.set(uuid, designator);
+        if (leg.magneticVariation) magvar.set(designator, Number(leg.magneticVariation));
+      }
       else if ((type === 'DesignatedPoint' || type === 'Navaid') && designator && pos) points.set(uuid, { ident: designator, at: pos });
       else if (type === 'RunwayDirection' && designator) runwayDirections.set(uuid, designator);
       else if (type === 'RunwayCentrelinePoint' && ref) centrelinePoints.set(uuid, ref);
-      else if (LEG.test(type)) legs.set(uuid, legPoint.start ?? legPoint.end);
+      else if (LEG.test(type)) {
+        legs.set(uuid, legPoint.start ?? legPoint.end);
+        if (/^H[MAF]$/.test(leg.legTypeARINC ?? '') && leg.course) {
+          holdLegs.set(uuid, {
+            type: leg.legTypeARINC,
+            course: Number(leg.course),
+            courseType: leg.courseType ?? '',
+            turn: leg.turnDirection ?? '',
+            minutes: leg.duration && leg.durationUom === 'MIN' ? Number(leg.duration) : null,
+            nm: leg.length && leg.lengthUom === 'NM' ? Number(leg.length) : null,
+          });
+        }
+      }
       else if (procedure) procedures.push(procedure);
       feature = null;
       continue;
@@ -141,6 +161,14 @@ async function readAixm(zip: string) {
 
     if (feature.type === 'RunwayCentrelinePoint' && line.includes('<aixm:onRunway')) ref = href(line);
 
+    // Champs simples utiles aux branches d'attente et à la déclinaison de l'aérodrome
+    const field = /<aixm:(legTypeARINC|course|courseType|turnDirection|magneticVariation)>([^<]*)</.exec(line);
+    if (field) leg[field[1]] ??= field[2];
+    const measure = /<aixm:(duration|length) uom="([^"]+)">([^<]*)</.exec(line);
+    if (measure) {
+      leg[measure[1]] ??= measure[3];
+      leg[`${measure[1]}Uom`] ??= measure[2];
+    }
     if (LEG.test(feature.type)) {
       if (line.includes('<aixm:startPoint>')) where = 'start';
       else if (line.includes('<aixm:endPoint>')) where = 'end';
@@ -175,7 +203,7 @@ async function readAixm(zip: string) {
   }
   const code = await new Promise<number | null>((resolve) => unzip.on('close', resolve));
   if (code) throw new Error(`lecture du zip AIXM impossible (unzip : ${code})`);
-  return { airports, points, runwayDirections, centrelinePoints, legs, procedures };
+  return { airports, points, runwayDirections, centrelinePoints, legs, holdLegs, magvar, procedures };
 }
 
 // ───────── Mise en forme ─────────
@@ -246,6 +274,25 @@ export async function buildDeceaProcedures(): Promise<{ amendment: string; airpo
         final: unique(final),
         missed: missed.filter((f) => !f.startsWith('RW')),
       };
+      // Attentes : branches HM/HA/HF de l'approche (cap magnétique converti avec la déclinaison de l'aérodrome)
+      const holds: Hold[] = [];
+      for (const t of p.transitions) {
+        for (const { leg } of t.legs) {
+          const h = data.holdLegs.get(leg);
+          const point = data.points.get(data.legs.get(leg) ?? '');
+          if (!h || !point || !/^(LEFT|RIGHT)$/.test(h.turn) || holds.some((x) => x.fix === point.ident)) continue;
+          const course = /MAG/.test(h.courseType) ? h.course + (data.magvar.get(icao) ?? 0) : h.course;
+          holds.push({
+            fix: point.ident,
+            kind: h.type as Hold['kind'],
+            lngLat: point.at,
+            courseT: Math.round(((course + 360) % 360) * 10) / 10,
+            turn: h.turn === 'LEFT' ? 'L' : 'R',
+            ...(h.nm ? { legNm: h.nm } : { legMin: h.minutes ?? 1 }),
+          });
+        }
+      }
+      if (holds.length) approach.holds = holds;
       entry.approaches!.push(approach);
       continue;
     }

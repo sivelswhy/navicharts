@@ -5,6 +5,7 @@ import type { LngLat } from './georef.ts';
 import { searchNav } from './navSearch.ts';
 import { fetchProcedures, type Approach, type Procedure } from './route.ts';
 import type { Airport } from './types.ts';
+import { holdPath } from './holds.ts';
 
 // Au-delà, un point du même nom n'appartient pas aux procédures de l'aérodrome
 const MAX_DISTANCE_NM = 120;
@@ -34,6 +35,8 @@ export interface PlacedApproach {
   initial: { iaf: string; points: ProcedurePoint[] }[];
   final: ProcedurePoint[];
   missed: ProcedurePoint[];
+  /** Circuits d'attente, tracés */
+  holds: { fix: string; path: LngLat[] }[];
   missing: string[];
 }
 
@@ -90,6 +93,11 @@ export async function loadPlacedProcedures(airport: Airport): Promise<AirportPro
         initial: approach.initial.map((b) => ({ iaf: b.iaf, points: place(b.fixes, missing) })),
         final: place(approach.final, missing),
         missed: place(approach.missed, missing),
+        holds: (approach.holds ?? []).flatMap((h) => {
+          const at = h.lngLat ?? found.get(h.fix) ?? h.path?.[0];
+          const path = at ? holdPath(h, at) : null;
+          return path ? [{ fix: h.fix, path }] : [];
+        }),
         missing: [...new Set(missing)],
       };
     }),
@@ -136,6 +144,7 @@ export function proceduresGeoJson(airport: Airport, procedures: PlacedProcedure[
     // IAF : premier point de chaque branche, s'il a pu être situé
     fixes('APP', a.initial.flatMap((b) => (b.points[0]?.ident === b.iaf ? [b.points[0]] : [])), 'IAF');
     fixes('APP', [...a.initial.flatMap((b) => b.points), ...a.final, ...a.missed]);
+    for (const h of a.holds) line(h.path, { type: 'APP', kind: 'hold', ident: `Attente ${h.fix}` });
   }
   return { type: 'FeatureCollection', features };
 }

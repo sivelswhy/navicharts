@@ -278,9 +278,19 @@ export function MapView({
       ];
       const isProcedureLine: maplibregl.ExpressionSpecification = ['==', ['geometry-type'], 'LineString'];
       const isMissed: maplibregl.ExpressionSpecification = ['==', ['get', 'kind'], 'missed'];
-      for (const layer of procedureBandLayers('procedure-lines', { source: 'procedures', filter: ['all', isProcedureLine, ['!', isMissed]] }, procedureColor)) {
+      const isHold: maplibregl.ExpressionSpecification = ['==', ['get', 'kind'], 'hold'];
+      for (const layer of procedureBandLayers('procedure-lines', { source: 'procedures', filter: ['all', isProcedureLine, ['!', isMissed], ['!', isHold]] }, procedureColor)) {
         m.addLayer(layer);
       }
+      // Circuits d'attente : trait fin continu
+      m.addLayer({
+        id: 'procedure-holds',
+        type: 'line',
+        source: 'procedures',
+        filter: ['all', isProcedureLine, isHold],
+        layout: { 'line-join': 'round' },
+        paint: { 'line-color': procedureColor, 'line-width': 2, 'line-opacity': 0.9 },
+      });
       // Approche interrompue : trait fin en tirets, pour la distinguer de l'approche
       m.addLayer({
         id: 'procedure-missed',
@@ -336,9 +346,18 @@ export function MapView({
         id: 'route-casing',
         type: 'line',
         source: 'route',
-        filter: ['all', isLine, ['!', isProcedure]],
+        filter: ['all', isLine, ['!', isProcedure], ['!=', ['get', 'style'], 'hold']],
         layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.9 },
+      });
+      // Circuits d'attente de l'approche choisie : trait fin continu
+      m.addLayer({
+        id: 'route-holds',
+        type: 'line',
+        source: 'route',
+        filter: ['all', isLine, ['==', ['get', 'style'], 'hold']],
+        layout: { 'line-join': 'round' },
+        paint: { 'line-color': PHASE_COLOR, 'line-width': 2, 'line-opacity': 0.9 },
       });
       m.addLayer({
         id: 'route-line',
