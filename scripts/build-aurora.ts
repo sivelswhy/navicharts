@@ -38,10 +38,13 @@ function unwrap(coords: Position[]): Position[] {
   });
 }
 
-/** Polygone si le tracé se referme, ligne sinon */
+// Espaces de travail laissés dans certains sector files (Italie, Moyen-Orient)
+const PLACEHOLDER = /^(dummy|temp)$/i;
+
+/** Polygone si le tracé se referme, ligne sinon ; aucun tracé s'il passe par 0° N 0° E (coordonnées par défaut) */
 function shape(points: (MapPoint | null)[]): { type: string; coordinates: unknown } | null {
   const coords = unwrap(points.filter((p): p is MapPoint => Boolean(p)).map(fromMap));
-  if (coords.length < 2) return null;
+  if (coords.length < 2 || coords.some(([lon, lat]) => Math.abs(lon) < 0.01 && Math.abs(lat) < 0.01)) return null;
   const [first, last] = [coords[0], coords.at(-1)!];
   const closed = coords.length >= 4 && Math.hypot(first[0] - last[0], first[1] - last[1]) < 0.01;
   return closed ? { type: 'Polygon', coordinates: [[...coords.slice(0, -1), first]] } : { type: 'LineString', coordinates: coords };
@@ -168,6 +171,7 @@ export async function buildAurora(): Promise<Omit<IvaoData, 'divisions' | 'vfr'>
     for (const s of sections) {
       for (const [category, list] of [['fir', s.airspaces], ['low', s.airspacesLow], ['high', s.airspacesHigh]] as const) {
         for (const a of list ?? []) {
+          if (PLACEHOLDER.test(a.identifier)) continue;
           const k = `${category} ${a.identifier}`;
           occurrences.set(k, [...(occurrences.get(k) ?? []), { level: s.level, category, identifier: a.identifier, points: a.mapPoints }]);
         }
