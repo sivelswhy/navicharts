@@ -465,13 +465,12 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       id: 'airways',
       type: 'line',
       source: 'airways',
-      // Visibles dès l'échelle d'un continent (l'Amérique du Nord entière tient vers le zoom 4)
-      minzoom: 4,
+      // Visibles à tous les niveaux de zoom, en trait fin et atténué quand la carte est dézoomée
       ...onlyIvaoInDev,
       paint: {
         'line-color': AERO_COLORS.airway,
-        'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.4, 10, 1.5],
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.5, 7, 1],
+        'line-width': ['interpolate', ['linear'], ['zoom'], 0, 0.3, 4, 0.4, 10, 1.5],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 0, 0.35, 4, 0.5, 7, 1],
       },
     });
     add({
@@ -642,11 +641,11 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
     id: 'waypoints',
     type: 'symbol',
     source: 'waypoints',
-    minzoom: 7,
+    // Visibles à tous les niveaux de zoom (symbole réduit quand la carte est dézoomée) ; leur nom à partir du zoom 8,5
     ...onlyIvaoInDev,
     layout: {
       'icon-image': 'waypoint',
-      'icon-size': ['interpolate', ['linear'], ['zoom'], 7, 0.5, 11, 0.8],
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 0, 0.12, 4, 0.2, 7, 0.5, 11, 0.8],
       'icon-allow-overlap': true,
       'text-field': expr(['step', ['zoom'], '', 8.5, ['get', 'ident']]),
       'text-font': FONT_REGULAR,
@@ -1024,13 +1023,8 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       'icon-image': expr(NAVAID_ICON),
       'icon-size': ['interpolate', ['linear'], ['zoom'], 5.5, 0.7, 10, 1],
       'icon-allow-overlap': true,
-      'text-field': expr([
-        'step',
-        ['zoom'],
-        ['get', 'ident'],
-        8,
-        ['format', ['get', 'ident'], {}, '\n', {}, ['coalesce', ['get', 'frequency'], ''], { 'font-scale': 0.85, 'text-font': ['literal', FONT_REGULAR] }],
-      ]),
+      // Identifiant seul : la fréquence est dans la fiche de la balise (clic)
+      'text-field': ['get', 'ident'],
       'text-font': FONT_BOLD,
       'text-size': 10,
       'text-offset': [0, 1.2],
