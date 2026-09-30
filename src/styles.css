@@ -1172,6 +1172,7 @@ h3 {
   margin: 8px 0 0;
   padding: 0 8px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
 }
 
@@ -1180,6 +1181,8 @@ h3 {
   border-radius: var(--radius);
   background: var(--bg-400);
   border-left: 3px solid var(--yellow-500);
+  /* Coordonnées, horaires ou adresses sans espace : coupés plutôt que de déborder du panneau */
+  overflow-wrap: anywhere;
 }
 
 .notam header {
