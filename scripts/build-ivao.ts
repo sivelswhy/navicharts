@@ -12,6 +12,7 @@
 //   pistes : ident;QFU1;QFU2;altitude1;altitude2;cap1;cap2;lat1;lon1;lat2;lon2      ATC : indicatif;fréquence;préfixes
 // Les modèles d'ATIS (.cpr) et les fonds radar (videomaps) sont propres au client Aurora : ils ne sont pas repris.
 import { DIVISIONS, distance, isCoordinate, position, repoFiles, sectorFiles, type Division } from '../server/sectorfiles.ts';
+import { buildAurora } from './build-aurora.ts';
 
 type Position = [number, number];
 type Candidate = { at: Position; kind: 'navaid' | 'fix' };
@@ -116,12 +117,13 @@ async function loadDivision(division: Division) {
     get(/\.vor$/i),
     get(/\.ndb$/i),
     get(/\.fix$/i),
-    // Routes hautes / basses : K.awh, airways.high, SEFG_HIGH.AWY, SUEOhigh.awy…
-    get(/(\.awh|airways\.high|high\.awy)$/i),
-    get(/(\.awl|airways\.low|low\.awy)$/i),
+    // Routes hautes / basses : K.awh, airways.high, SEFG_HIGH.AWY, SUEOhigh.awy, rjjj.highaw, WSJC.HAIRWAY…
+    get(/(\.awh|airways\.high|high\.awy|\.highaw|\.hairway)$/i),
+    get(/(\.awl|airways\.low|low\.awy|\.lowaw|\.lairway)$/i),
     get(/\.vfi$/i),
     get(/\.(vrt|vtr)$/i),
-    get(/\.artcc$/i),
+    // Limites : .artcc, .hartcc/.lartcc (Indonésie, Singapour), .acc/.acchigh/.acclow (Japon), .hairspace/.lairspace (Thaïlande)
+    get(/\.(artcc|hartcc|lartcc|acc|acchigh|acclow|hairspace|lairspace)$/i),
     get(/\.mva$/i),
     get(/polygons\/online\.ply$/i),
     get(/(airports\.ap|\.apt|[^/]+\.ap)$/i),
@@ -162,8 +164,8 @@ function buildAirways(loaded: Loaded[]) {
     const at = position(lat, lon);
     if (add(ident, at, 'navaid')) navaids.push(point(at, { ident, name, type: 'NDB', frequency: `${khz} kHz` }));
   }
-  // Type 0 (ou absent) : points en route ; les autres sont des points d'aérodrome ou de procédure
-  for (const [ident, lat, lon, type] of all(loaded, 'fixes')) if (!type || type === '0') add(ident, position(lat, lon), 'fix');
+  // Type 2 : points d'aérodrome (États-Unis) ; les autres types varient selon les divisions (0, 1, absent)
+  for (const [ident, lat, lon, type] of all(loaded, 'fixes')) if (type !== '2') add(ident, position(lat, lon), 'fix');
 
   const airways: Feature[] = [];
   const segments = new Set<string>();
@@ -246,14 +248,17 @@ function airspaceType(file: string, name: string): { type: string; class: string
   if (/dummy/i.test(name)) return null;
   // Rôle du fichier d'après son nom : artcc.artcc / SEFGARTCC.ARTCC (FIR), high.artcc / SUEOhigh.artcc, low.artcc…
   const base = file.split('/').at(-1)!.toLowerCase();
-  const role = /high/.test(base) ? 'high' : /low/.test(base) ? 'low' : 'fir';
+  const role = /high|\.hartcc$|\.hairspace$/.test(base) ? 'high' : /low|\.lartcc$|\.lairspace$/.test(base) ? 'low' : 'fir';
   if (role === 'fir') return { type: 'FIR', class: '', name: name.replace(/_\d+$/, '') };
   // Limites des organismes d'approche (TRACON)
+  // Secteur d'un centre de contrôle (« VTBB_N_CTR »)
+  if (/_CTR$/.test(name)) return { type: 'CTA', class: '', name };
   if (role === 'high') return { type: 'TMA', class: '', name: `${name} APP` };
   const cls = /CLASS ([A-G])/i.exec(name)?.[1]?.toUpperCase();
   if (cls) return { type: cls === 'D' ? 'CTR' : 'TMA', class: cls, name: `CLASS ${cls}` };
   if (/\bTCA\b/.test(name)) return { type: 'TMA', class: '', name };
-  if (/\bCZ\b/.test(name)) return { type: 'CTR', class: '', name };
+  if (/\bCZ\b|\bCTR\b/.test(name)) return { type: 'CTR', class: '', name };
+  if (/TMA/.test(name)) return { type: 'TMA', class: '', name };
   return { type: 'CTA', class: '', name };
 }
 
@@ -457,5 +462,17 @@ export async function buildIvao(): Promise<IvaoData> {
       `${result.runways.length} pistes, ${result.atc.length} fréquences ATC, ${result.vfr.length} éléments VFR, ` +
       `${result.airspaces.length} limites d'espaces, ${result.mva.length} éléments MVA, ${result.sectors.length} secteurs ATC`,
   );
+
+  // Sector files au format du cache d'Aurora (dépôt GitHub cloné dans .cache/aurora)
+  const aurora = await buildAurora().catch((err) => {
+    console.warn(`⚠ Sector files Aurora locaux : ${(err as Error).message}`);
+    return null;
+  });
+  if (aurora?.folders.length) {
+    result.divisions.push(`Aurora (${aurora.folders.length} sector files)`);
+    for (const k of ['airways', 'waypoints', 'navaids', 'airspaces', 'mva', 'sectors', 'airports', 'atc'] as const) (result[k] as unknown[]).push(...aurora[k]);
+    const runways = new Set(result.runways.map((r) => `${r.airport} ${r.ends.map((e) => e.ident).join('/')}`));
+    result.runways.push(...aurora.runways.filter((r) => !runways.has(`${r.airport} ${r.ends.map((e) => e.ident).join('/')}`)));
+  }
   return result;
 }

@@ -19,6 +19,8 @@ const AIRPORT_TYPES = new Set(['large_airport', 'medium_airport', 'small_airport
 // Outre-mer français (eAIP du SIA) : Guadeloupe, Martinique, Guyane, Réunion, Mayotte, Saint-Pierre-et-Miquelon,
 // Saint-Martin, Saint-Barthélemy, Polynésie, Nouvelle-Calédonie, Wallis-et-Futuna, Terres australes
 const FRENCH_OVERSEAS = new Set(['GP', 'MQ', 'GF', 'RE', 'YT', 'PM', 'MF', 'BL', 'PF', 'NC', 'WF', 'TF']);
+// Asie : pays dont l'eAIP est lue (voir server/eaip.ts) : Corée du Sud, Taïwan, Thaïlande, Israël
+const ASIA = new Set(['KR', 'TW', 'TH', 'IL']);
 
 type Row = Record<string, string>;
 
@@ -126,7 +128,8 @@ function sectorAirports(ivao: IvaoData | null, airports: Row[], runways: Row[], 
       taken.add(row.ident);
       identOf.set(s.ident, row.ident);
       result.airports.push(row.type === 'balloonport' ? { ...row, type: 'small_airport' } : row);
-    } else if (!row) {
+    } else if (!row && s.country) {
+      // Sector file local : pays inconnu, l'aérodrome n'est repris que s'il figure dans OurAirports
       identOf.set(s.ident, s.ident);
       result.airports.push({
         ident: s.ident,
@@ -225,7 +228,10 @@ async function main() {
   // Brésil : aérodromes OurAirports (le DECEA fournit routes, balises et espaces, voir build-decea.ts)
   const brazil = decea ? airports.filter((a) => a.iso_country === 'BR' && AIRPORT_TYPES.has(a.type) && a.type !== 'heliport') : [];
   const overseas = airports.filter((a) => FRENCH_OVERSEAS.has(a.iso_country) && AIRPORT_TYPES.has(a.type));
-  const selected = [...europe, ...overseas, ...northAmerica.airports, ...brazil];
+  // Hors héliports, très nombreux (plus d'un millier en Corée du Sud)
+  const asia = airports.filter((a) => ASIA.has(a.iso_country) && AIRPORT_TYPES.has(a.type) && a.type !== 'heliport');
+  // Un aérodrome peut venir de deux sources (eAIP et sector files IVAO en Thaïlande) : une seule fiche
+  const selected = [...new Map([...europe, ...overseas, ...asia, ...northAmerica.airports, ...brazil].map((a) => [a.ident, a])).values()];
   const runways = [...ourRunways, ...northAmerica.runways];
   const frequencies = [...ourFrequencies, ...northAmerica.frequencies];
   const idents = new Set(selected.map((a) => a.ident));
@@ -337,7 +343,7 @@ async function main() {
       return f.properties.ident === ident && Math.abs(x - lon) < 0.03 && Math.abs(y - lat) < 0.03;
     });
   const ourNavaids = navaids
-    .filter((n) => countries.has(n.iso_country) && inEurope(Number(n.latitude_deg), Number(n.longitude_deg)))
+    .filter((n) => countries.has(n.iso_country) && (ASIA.has(n.iso_country) || inEurope(Number(n.latitude_deg), Number(n.longitude_deg))))
     .filter((n) => !nearAip(n.ident, Number(n.longitude_deg), Number(n.latitude_deg)))
     .map((n) => {
       const khz = num(n.frequency_khz);

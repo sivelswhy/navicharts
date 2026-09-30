@@ -1,8 +1,8 @@
 # NaviCharts
 
-Alternative gratuite à Navigraph pour la simulation de vol, couvrant l'**Europe**, l'**outre-mer français** et une
-partie des **Amériques**, construite à partir de données publiques (et, pour certains pays des Amériques, des sector
-files publiés par la communauté IVAO).
+Alternative gratuite à Navigraph pour la simulation de vol, couvrant l'**Europe**, l'**outre-mer français**, une
+partie des **Amériques** et une grande partie de l'**Asie**, construite à partir de données publiques (et, là où il
+n'y en a pas, des sector files de la communauté IVAO).
 
 | Pays | Cartes officielles | Espaces, routes, points | SID, STAR, approches |
 | --- | --- | --- | --- |
@@ -12,6 +12,9 @@ files publiés par la communauté IVAO).
 | Finlande, Islande | eAIP nationales (AD 2.24) | — | — |
 | Brésil | — | DECEA : GeoAISWEB (routes, points, balises, FIR, CTA, TMA, CTR, zones P/R/D) | DECEA : jeu AIXM 5.1 officiel |
 | États-Unis, Canada, Équateur, Uruguay | — | Sector files IVAO (routes, balises, points, espaces, VFR, MVA) | Sector files IVAO (sauf Uruguay) |
+| Corée du Sud, Taïwan, Thaïlande, Israël | eAIP nationales (AD 2.24) | Routes et points : eAIP ENR 3.1–3.3, 4.4 | Thaïlande : sector files IVAO |
+| Japon, Singapour, Indonésie | — | Sector files IVAO | Sector files IVAO |
+| Chine, Hong Kong, Inde, Asie du Sud-Est, Asie centrale, Moyen-Orient (44 FIR) | — | Sector files Aurora | Sector files Aurora |
 | Autres pays d'Europe | — (aérodromes, pistes, fréquences, balises et plan au sol uniquement) | — | — |
 
 ## Démarrage
@@ -34,7 +37,9 @@ Production : `npm run build && npm start` (port 4173, modifiable via `PORT`).
 | Cartes IFR (ADC, SID, STAR, IAC…) et tableaux de codage des procédures | eAIP France et outre-mer, [SIA](https://www.sia.aviation-civile.gouv.fr/) | © SIA/DGAC |
 | Brésil : routes, points, balises, espaces aériens | DECEA, [GeoAISWEB](https://geoaisweb.decea.mil.br) (WFS public, cache 1 jour dans `.cache/decea`) | Données publiques du DECEA |
 | Brésil : SID, STAR, approches | DECEA, [jeu AIXM complet](https://aisweb.decea.gov.br/?i=publicacoes&p=aixm) de l'amendement en vigueur (zip de ~55 Mo lu en flux) | Données publiques du DECEA |
-| États-Unis, Canada, Équateur, Uruguay : navdata, espaces, VFR, MVA, secteurs ATC, procédures, plans au sol | Sector files Aurora des divisions IVAO : [US](https://github.com/IVAO-US/SectorFiles), [Canada](https://github.com/IVAO-Canada/SectorFiles), [Équateur](https://github.com/IVAO-Ecuador/IVAO-SectorFile), [Uruguay](https://github.com/Miguel22247/Aurora-Sector-File) (cache 1 jour dans `.cache/sectorfiles`) | Canada : GPL-3.0 ; autres : sans licence (US : navdata « Keyvan Aviation ») — réservé à la simulation |
+| États-Unis, Canada, Équateur, Uruguay, Japon, Singapour, Indonésie, Thaïlande : navdata, espaces, VFR, MVA, secteurs ATC, procédures, plans au sol | Sector files Aurora des divisions IVAO : [US](https://github.com/IVAO-US/SectorFiles), [Canada](https://github.com/IVAO-Canada/SectorFiles), [Équateur](https://github.com/IVAO-Ecuador/IVAO-SectorFile), [Uruguay](https://github.com/Miguel22247/Aurora-Sector-File), [Japon](https://github.com/NightFalconS/RJJJ-AuroraSectorFile), [Singapour](https://github.com/NightFalconS/WSJCAuroraSectorFile), [Indonésie](https://github.com/IVAOID/ID-Sectorfile), [Thaïlande](https://github.com/ivaoth/sector-file) (cache 1 jour dans `.cache/sectorfiles`) | Canada, Indonésie : GPL-3.0 ; autres : sans licence (US : navdata « Keyvan Aviation ») — réservé à la simulation |
+| Asie (Chine, Hong Kong, Inde, Asie du Sud-Est, Asie centrale, Moyen-Orient) : mêmes données | Cache JSON d'Aurora, dépôt [navicharts-sector-files](https://github.com/sivelswhy/navicharts-sector-files) (clone superficiel dans `.cache/aurora`, mis à jour une fois par jour) | Données des divisions IVAO — réservé à la simulation |
+| Cartes et routes : Corée du Sud, Taïwan, Thaïlande, Israël | eAIP nationales (KOCA, CAA Taïwan, CAAT, CAAI) | © services nationaux |
 | Cartes VAC | Atlas VAC, SIA | © SIA/DGAC |
 | NOTAM | [SOFIA-Briefing](https://sofia-briefing.aviation-civile.gouv.fr), SIA/DGAC (bulletin d'aérodrome, sans compte, cache 10 min) | Licence Ouverte Etalab 2.0 |
 | METAR | [aviationweather.gov](https://aviationweather.gov) (NOAA) | Domaine public |
@@ -75,6 +80,7 @@ redistribuées. Le build de production n'utilise pas autorouter.
 - `scripts/build-aip.ts` : extraction des balises, points, routes et espaces aériens des eAIP du SIA, métropole et outre-mer (champs AIXM du HTML)
 - `scripts/build-eaip-enr.ts` : routes et points des eAIP européens au format Eurocontrol (Royaume-Uni, Estonie)
 - `scripts/build-ivao.ts` : données statiques des sector files IVAO (routes, balises, aérodromes, pistes, fréquences ATC, VFR, espaces, zones P/R/D, MVA, secteurs ATC)
+- `scripts/build-aurora.ts` : mêmes données, depuis le cache JSON d'Aurora (dépôt `navicharts-sector-files`)
 - `scripts/build-decea.ts` : couches GeoAISWEB du DECEA (Brésil)
 - `scripts/build-decea-procedures.ts` : SID, STAR et approches du jeu AIXM du DECEA → `public/data/procedures/<OACI>.json`
 - `src/lib/mapStyle.ts`, `aeroIcons.ts`, `aeroLayers.ts` : fond de carte clair, symboles OACI et couches aéronautiques
@@ -83,7 +89,9 @@ redistribuées. Le build de production n'utilise pas autorouter.
 - `server/sia.ts` : index des cartes des eAIP du SIA (métropole et outre-mer, chacune à sa date de publication) et de l'atlas VAC
 - `server/sectorfiles.ts` : sector files IVAO (dépôts GitHub, cache disque, coordonnées décimales ou DMS) ; procédures et plans au sol
   à la demande ; ajouter une division = ajouter une entrée à `DIVISIONS`
-- `server/eaip.ts` : fournisseur générique pour les eAIP au format Eurocontrol (menu → page AD 2 → PDF de la section AD 2.24) ;
+- `server/aurora.ts` : sector files au format du cache d'Aurora (clone du dépôt, positions Web Mercator) ; procédures (points
+  retrouvés par position) et plans au sol à la demande
+- `server/eaip.ts` : fournisseur générique pour les eAIP au format Eurocontrol, Europe et Asie (menu → page AD 2 → PDF de la section AD 2.24) ;
   ajouter un pays = ajouter une entrée à `EAIP_COUNTRIES`
 - `server/ground.ts` : plan au sol par aérodrome, sector files IVAO sinon OpenStreetMap (serveurs Overpass de repli, cache disque)
 - `server/procedures.ts` : SID, STAR et approches d'après les tableaux de codage des eAIP du SIA

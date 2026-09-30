@@ -76,6 +76,7 @@ export const LAYER_GROUPS: Record<LayerGroup, string[]> = {
     'ground-pier',
     'ground-runway',
     'ground-taxiway-labels',
+    'ground-taxiway-point-labels',
     'ground-holding',
     'ground-stands',
   ],
@@ -181,8 +182,8 @@ const filter = (e: unknown) => e as FilterSpecification;
 // L'UTA (au-dessus du FL 195) couvre tout le territoire et suit les limites des FIR : elle n'est pas dessinée.
 const CONTROLLED = filter(['all', ['in', ['get', 'type'], ['literal', ['CTA', 'TMA', 'CTR']]], ['!=', ['get', 'class'], 'E']]);
 const CLASS_E = filter(['any', ['==', ['get', 'class'], 'E'], ['==', ['get', 'type'], 'LTA']]);
-/** En dev, seules les données hors d'Europe (sector files IVAO, DECEA, outre-mer du SIA) : l'Europe vient d'autorouter */
-const AMERICAS_DATA = ['any', ['==', ['get', 'ivao'], true], ['in', ['get', 'source'], ['literal', ['DECEA', 'SIA outre-mer']]]];
+/** En dev, seules les données hors d'Europe (sector files IVAO, DECEA, outre-mer du SIA, eAIP d'Asie) : l'Europe vient d'autorouter */
+const AMERICAS_DATA = ['any', ['==', ['get', 'ivao'], true], ['in', ['get', 'source'], ['literal', ['DECEA', 'SIA outre-mer', 'eAIP hors Europe']]]];
 const scoped = (f?: FilterSpecification) => (AUTOROUTER ? filter(f ? ['all', AMERICAS_DATA, f] : AMERICAS_DATA) : f);
 // Sans filtre en production : une clé `filter` indéfinie ferait refuser la couche
 const onlyIvaoInDev = AUTOROUTER ? { filter: scoped() } : {};
@@ -767,6 +768,23 @@ export function addAeroLayers(map: MapLibreMap, beforeId?: string) {
       'icon-text-fit': 'both',
       'icon-text-fit-padding': [1, 3, 1, 3],
       'icon-rotation-alignment': 'viewport',
+    },
+    paint: { 'text-color': '#1f1f1f' },
+  });
+  // Étiquettes de taxiway sans tracé (sector files au format Aurora)
+  add({
+    id: 'ground-taxiway-point-labels',
+    type: 'symbol',
+    source: GROUND_SOURCE,
+    minzoom: 13.5,
+    filter: kind('taxiway-label'),
+    layout: {
+      'text-field': ['get', 'ref'],
+      'text-font': FONT_BOLD,
+      'text-size': ['interpolate', ['linear'], ['zoom'], 13.5, 9, 17, 12],
+      'icon-image': 'box-taxiway',
+      'icon-text-fit': 'both',
+      'icon-text-fit-padding': [1, 3, 1, 3],
     },
     paint: { 'text-color': '#1f1f1f' },
   });

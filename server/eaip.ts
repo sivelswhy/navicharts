@@ -1,4 +1,4 @@
-// Cartes d'aérodrome publiées dans les eAIP européens au format Eurocontrol.
+// Cartes d'aérodrome publiées dans les eAIP au format Eurocontrol (Europe, et plusieurs pays d'Asie qui l'ont adopté).
 // Pour chaque pays : on localise l'eAIP en vigueur, on cherche la page AD 2 de l'aérodrome dans le menu,
 // puis on relève les liens PDF de la section AD 2.24 (cartes relatives à l'aérodrome).
 // Seuls les liens vers les documents officiels sont conservés ; les PDF ne sont jamais stockés.
@@ -15,6 +15,8 @@ export interface EaipCountry {
   host: string;
   /** URL du menu de l'eAIP en vigueur */
   menuUrl: () => Promise<string>;
+  /** Pays hors d'Europe (données affichées en dev, où autorouter couvre l'Europe) */
+  outsideEurope?: boolean;
 }
 
 async function fetchText(url: string): Promise<{ url: string; text: string } | null> {
@@ -39,7 +41,8 @@ function byAiracDate(template: (iso: string) => string): () => Promise<string> {
 }
 
 /**
- * Page listant les éditions dans des dossiers datés (…_AAAA_MM_JJ/) : on retient la plus récente déjà en vigueur.
+ * Page listant les éditions dans des dossiers datés (…_AAAA_MM_JJ/ ou AAAA-MM-JJ-AIRAC/) : on retient la plus récente
+ * déjà en vigueur (certains pays ne publient pas à chaque cycle AIRAC).
  * `menuPath` est le chemin du menu à l'intérieur du dossier.
  */
 function byListing(listingUrl: string, menuPath: string): () => Promise<string> {
@@ -47,7 +50,7 @@ function byListing(listingUrl: string, menuPath: string): () => Promise<string> 
     const page = await fetchText(listingUrl);
     if (!page) throw new Error('Liste des éditions introuvable');
     const today = new Date().toISOString().slice(0, 10);
-    const editions = [...page.text.matchAll(/href=["']\s*([^"']*?(\d{4})_(\d{2})_(\d{2})[^"']*?)["']/g)]
+    const editions = [...page.text.matchAll(/href=["']\s*([^"']*?(\d{4})[_-](\d{2})[_-](\d{2})[^"']*?)["']/g)]
       .map((m) => ({ href: m[1].trim(), date: `${m[2]}-${m[3]}-${m[4]}` }))
       .filter((e) => e.date <= today)
       .sort((a, b) => b.date.localeCompare(a.date));
@@ -93,6 +96,36 @@ export const EAIP_COUNTRIES: EaipCountry[] = [
     host: 'eaip.isavia.is',
     menuUrl: byListing('https://eaip.avians.is/', 'eAIP/menu.html'),
   },
+  // Asie
+  {
+    country: 'Corée du Sud',
+    outsideEurope: true,
+    prefixes: ['RK'],
+    host: 'aim.koca.go.kr',
+    // Éditions datées de la veille du cycle (heure de Séoul) : « 2026-09-02-AIRAC »
+    menuUrl: byListing('https://aim.koca.go.kr/eaipPub/Package/history-en-GB.html', 'eAIP/KR-menu-en-GB.html'),
+  },
+  {
+    country: 'Taïwan',
+    outsideEurope: true,
+    prefixes: ['RC'],
+    host: 'ais.caa.gov.tw',
+    menuUrl: byListing('https://ais.caa.gov.tw/eaip/', 'eAIP/menu.html'),
+  },
+  {
+    country: 'Thaïlande',
+    outsideEurope: true,
+    prefixes: ['VT'],
+    host: 'aip.caat.or.th',
+    menuUrl: byListing('https://aip.caat.or.th/', 'eAIP/VT-menu-en-GB.html'),
+  },
+  {
+    country: 'Israël',
+    outsideEurope: true,
+    prefixes: ['LL'],
+    host: 'e-aip.azurefd.net',
+    menuUrl: byListing('https://e-aip.azurefd.net/', 'eAIP/LL-menu-en-GB.html'),
+  },
 ];
 
 export function eaipCountryFor(icao: string): EaipCountry | undefined {
@@ -134,7 +167,8 @@ async function menu(url: string): Promise<string> {
 /** Page AD 2 de l'aérodrome d'après le menu (version anglaise de préférence) */
 function findAd2Page(menuHtml: string, menuUrl: string, icao: string): string | null {
   const hrefs = [...menuHtml.matchAll(/href=(["'])(.*?)\1/g)]
-    .map((m) => decodeEntities(m[2]).split('#')[0])
+    // Ancre et paramètre de version (« ?ver=20250728 », Corée) retirés
+    .map((m) => decodeEntities(m[2]).split(/[#?]/)[0])
     .filter((h) => h.includes(icao) && /AD[ -_.]?2?[ .-]/.test(h) && /\.html?$/i.test(h) && !h.includes('javascript'));
   if (!hrefs.length) return null;
   const best = hrefs.find((h) => /en-GB/i.test(h)) ?? hrefs[0];
@@ -145,18 +179,19 @@ function findAd2Page(menuHtml: string, menuUrl: string, icao: string): string | 
 // L'ordre compte : « RNAV HOLD CODING TABLES » est un tableau de codage, pas une approche
 const CATEGORY_RULES: [RegExp, ChartCategory][] = [
   [/CODING|DATA TABLE|TABULAR|\bFAS ?DB\b|\bFASDB\b/, 'DATA'],
-  [/VISUAL APPROACH|\bVAC\b|\bVFR\b/, 'VAC'],
+  [/VISUAL APPROACH|VISUAL APCH|\bVAC\b|\bVFR\b/, 'VAC'],
   [/STANDARD DEPARTURE|\bSID\b|DEPARTURE CHART/, 'SID'],
   [/STANDARD ARRIVAL|\bSTAR\b|ARRIVAL CHART|INITIAL APPROACH/, 'STAR'],
-  [/INSTRUMENT APPROACH|\bIAC\b|\bILS\b|\bLOC\b|\bRNP\b|\bRNAV\b|\bVOR\b|\bNDB\b|\bGNSS\b|APPROACH CHART/, 'APPROACH'],
-  [/AERODROME CHART|\bADC\b|\bAPDC\b|\bA?GMC\b|\bAMG\b|\bMARK\b|GROUND MOVEMENT|PARKING|DOCKING|TAXI|APRON|HOT ?SPOT/, 'GROUND'],
+  [/INSTRUMENT APPROACH|INSTR APCH|APCH CHART|\bIAC\b|\bILS\b|\bLOC\b|\bRNP\b|\bRNAV\b|\bVOR\b|\bNDB\b|\bGNSS\b|APPROACH CHART/, 'APPROACH'],
+  [/AERODROME CHART|\bAD CHART\b|\bADC\b|\bAPDC\b|\bA?GMC\b|\bAMG\b|\bMARK\b|GROUND MOVEMENT|PARKING|DOCKING|TAXI|APRON|HOT ?SPOT/, 'GROUND'],
 ];
 
 /** « EF_AD_2_EFHK_APDC.pdf » → « APDC » : code de carte normalisé contenu dans le nom du fichier */
 function fileCode(url: string, icao: string): string {
   const name = decodeURIComponent(url.split('/').pop() ?? '').replace(/\.pdf$/i, '');
   const afterIcao = name.split(new RegExp(`[_ -]${icao}[_ -]`, 'i'))[1] ?? name;
-  return afterIcao.replace(/_en$/i, '').replace(/[_-]+/g, ' ').trim();
+  // « (2-28) SID » (Corée) : le numéro de page ne dit rien de la carte
+  return afterIcao.replace(/_en$/i, '').replace(/^\(\d+-\d+\)\s*/, '').replace(/_\d{6,}$/, '').replace(/[_-]+/g, ' ').trim();
 }
 
 // Intitulés sans information (en-tête de colonne, rubrique)
@@ -175,6 +210,27 @@ export function parseAd2Charts(html: string, pageUrl: string, icao: string): Cha
 
   const charts: Chart[] = [];
   const seen = new Set<string>();
+
+  // Cartes présentées en blocs « graphic-box » (Corée) plutôt qu'en tableau : l'intitulé est celui du lien ;
+  // les versions remplacées restent affichées barrées (classe « AmdtDeleted… ») et sont ignorées
+  const boxes = [...html.matchAll(/<div class="(Figure[^"]*)"[^>]*>\s*<div class="graphic-box[^"]*">([\s\S]*?)<\/div>\s*<\/div>/g)];
+  if (boxes.length) {
+    for (const [, cls, box] of boxes) {
+      if (/Deleted/.test(cls)) continue;
+      const link = /<a[^>]+href=(["'])([^"']+\.pdf)\1[^>]*>([\s\S]*?)<\/a>/i.exec(box);
+      if (!link) continue;
+      const target = new URL(decodeEntities(link[2]), pageUrl);
+      // Liens écrits en http vers le même site servi en https : le relais PDF n'accepte que https
+      if (target.protocol === 'http:' && new URL(pageUrl).protocol === 'https:' && target.hostname === new URL(pageUrl).hostname) target.protocol = 'https:';
+      const url = target.href;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      const title = text(link[3]) || fileCode(url, icao);
+      charts.push({ id: `${icao}_${charts.length}_${url.split('/').pop()}`, title: title.slice(0, 160), category: categorize(title), url });
+    }
+    return charts;
+  }
+
   let heading = '';
   for (const row of section.split(/<tr\b[^>]*>/i)) {
     const links = [...row.matchAll(/<a[^>]+href=(["'])([^"']+\.pdf)\1[^>]*>([\s\S]*?)<\/a>/gi)];

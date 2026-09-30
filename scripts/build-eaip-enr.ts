@@ -1,5 +1,5 @@
-// Routes ATS (ENR 3.1 à 3.3) et points significatifs (ENR 4.4) des eAIP européens au format Eurocontrol
-// (Royaume-Uni, Estonie…). La lecture s'appuie sur la structure standard des tableaux de ces eAIP :
+// Routes ATS (ENR 3.1 à 3.3) et points significatifs (ENR 4.4) des eAIP au format Eurocontrol
+// (Royaume-Uni, Estonie, Corée du Sud, Taïwan, Thaïlande, Israël…). La lecture s'appuie sur la structure standard des tableaux de ces eAIP :
 // désignateur de route (classe « Route-designator »), lignes de points (Table-row-type-2) et lignes de
 // tronçons (Table-row-type-3, avec limites supérieure et inférieure).
 import { EAIP_COUNTRIES } from '../server/eaip.ts';
@@ -9,7 +9,9 @@ type Feature = { type: 'Feature'; geometry: { type: string; coordinates: unknown
 
 const USER_AGENT = { 'User-Agent': 'Mozilla/5.0 (compatible; NaviCharts/0.1; usage personnel)' };
 // Sections lues : routes conventionnelles, ATS et RNAV, puis points significatifs
-const ENR_PAGE = /ENR-(3\.[123]|4\.4)-en-GB\.html$/;
+// « KR-ENR-3.1-en-GB.html », ou une page par route : « RC-ENR 3.1 A1-en-GB.html » (Taïwan)
+const ENR_PAGE = /ENR[- ](3\.[123]|4\.4)( [^/]*)?-en-GB\.html$/;
+const WAYPOINT_PAGE = /ENR[- ]4\.4/;
 
 const decodeEntities = (s: string) =>
   s
@@ -131,10 +133,43 @@ function parseWaypoints(html: string): Feature[] {
   return features;
 }
 
+/**
+ * Mise en page sans les classes Eurocontrol (Taïwan) : une page par route, nommée d'après elle (« RC-ENR 3.1 A1 »),
+ * dont les lignes de points portent l'identifiant du point (« BULANrow2 ») ; en ENR 4.4, « ABSOLENR44 »
+ */
+function parsePlainRoute(html: string, url: string): { airways: Feature[]; points: RoutePoint[] } {
+  const name = /ENR[- ]3\.[123] ([A-Z]{1,2}\d{1,4}[A-Z]?)\b/.exec(decodeURIComponent(url))?.[1];
+  const airways: Feature[] = [];
+  const points: RoutePoint[] = [];
+  if (!name) return { airways, points };
+  let previous: RoutePoint | null = null;
+  for (const [, ident, row] of html.matchAll(/<tr\b[^>]*\bid="([A-Z0-9]{2,5})row\d+"[^>]*>([\s\S]*?)<\/tr>/g)) {
+    const at = coordinates(text(row));
+    if (!at) continue;
+    const here: RoutePoint = { ident, at };
+    points.push(here);
+    if (previous) {
+      airways.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: [previous.at, at] }, properties: { name, lowerFl: null, upperFl: null, from: previous.ident, to: ident } });
+    }
+    previous = here;
+  }
+  return { airways, points };
+}
+
+function parsePlainWaypoints(html: string): Feature[] {
+  const features: Feature[] = [];
+  for (const [, ident, row] of html.matchAll(/<tr\b[^>]*\bid="([A-Z0-9]{2,5})ENR44"[^>]*>([\s\S]*?)<\/tr>/g)) {
+    const at = coordinates(text(row));
+    if (at) features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: at }, properties: { ident } });
+  }
+  return features;
+}
+
 async function country(menuUrl: string): Promise<{ airways: Feature[]; waypoints: Feature[] }> {
   const menu = await (await fetch(menuUrl, { headers: USER_AGENT })).text();
-  const pages = [...new Set([...menu.matchAll(/href=["']([^"'#]+)/g)].map((m) => new URL(m[1], menuUrl).href))].filter((u) =>
-    ENR_PAGE.test(u),
+  // Paramètre de version (« ?ver=20250728 », Corée) retiré
+  const pages = [...new Set([...menu.matchAll(/href=["']([^"'#?]+)/g)].map((m) => new URL(m[1], menuUrl).href))].filter((u) =>
+    ENR_PAGE.test(decodeURIComponent(u)),
   );
   const airways: Feature[] = [];
   const waypoints: Feature[] = [];
@@ -143,9 +178,10 @@ async function country(menuUrl: string): Promise<{ airways: Feature[]; waypoints
     const res = await fetch(url, { headers: USER_AGENT });
     if (!res.ok) continue;
     const html = await res.text();
-    if (url.includes('ENR-4.4')) waypoints.push(...parseWaypoints(html));
+    const plain = !html.includes('Route-designator') && !html.includes('id="SP-');
+    if (WAYPOINT_PAGE.test(decodeURIComponent(url))) waypoints.push(...(plain ? parsePlainWaypoints(html) : parseWaypoints(html)));
     else {
-      const routes = parseRoutes(html);
+      const routes = plain ? parsePlainRoute(html, url) : parseRoutes(html);
       airways.push(...routes.airways);
       routePoints.push(...routes.points);
     }
@@ -160,12 +196,14 @@ async function country(menuUrl: string): Promise<{ airways: Feature[]; waypoints
   return { airways, waypoints };
 }
 
-/** Routes et points des eAIP européens au format Eurocontrol (hors France, lue à part) */
+/** Routes et points des eAIP au format Eurocontrol (hors France, lue à part) */
 export async function buildEaipEnr(): Promise<{ airways: Feature[]; waypoints: Feature[]; countries: string[] }> {
   const results = await Promise.all(
     EAIP_COUNTRIES.map(async (c) => {
       try {
         const data = await country(await c.menuUrl());
+        // Hors d'Europe : marqué pour rester affiché en dev, où autorouter remplace nos données européennes
+        if (c.outsideEurope) for (const f of [...data.airways, ...data.waypoints]) f.properties.source = 'eAIP hors Europe';
         return { name: c.country, ...data };
       } catch (err) {
         console.warn(`⚠ eAIP ${c.country} : ${(err as Error).message}`);

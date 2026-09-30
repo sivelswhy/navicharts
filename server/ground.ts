@@ -3,6 +3,7 @@
 // d'après OpenStreetMap, via l'API Overpass. Résultat mis en cache sur disque par aérodrome.
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { getAuroraGround } from './aurora.ts';
 import { getSectorGround } from './sectorfiles.ts';
 
 const CACHE_DIR = path.resolve(import.meta.dirname, '..', '.cache', 'ground');
@@ -25,7 +26,7 @@ export interface GroundFeature {
   geometry: Geometry;
   properties: {
     /** `building` et `pier` (passerelles) : sector files IVAO uniquement */
-    kind: 'taxiway' | 'runway' | 'apron' | 'building' | 'pier' | 'holding' | 'stand';
+    kind: 'taxiway' | 'taxiway-label' | 'runway' | 'apron' | 'building' | 'pier' | 'holding' | 'stand';
     ref: string | null;
     /** Point d'attente : « runway », « ILS », « intermediate »… */
     holdingType?: string | null;
@@ -163,7 +164,7 @@ const RETRY_DELAY_MS = 2 * 60 * 1000;
 const failures = new Map<string, { at: number; error: Error }>();
 
 export async function getGround(ident: string, lat: number, lon: number): Promise<GroundFeature[]> {
-  const sector = await getSectorGround(ident).catch(() => null);
+  const sector = (await getSectorGround(ident).catch(() => null)) ?? (await getAuroraGround(ident).catch(() => null));
   if (sector?.length) return sector;
 
   const file = path.join(CACHE_DIR, `${ident}.json`);

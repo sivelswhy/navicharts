@@ -90,7 +90,7 @@ export interface AirportProcedures {
 }
 
 /** Pays couverts par les sector files IVAO (voir server/sectorfiles.ts) */
-export const SECTOR_FILE_COUNTRIES = new Set(['US', 'CA', 'EC', 'UY']);
+export const SECTOR_FILE_COUNTRIES = new Set(['US', 'CA', 'EC', 'UY', 'JP', 'SG', 'ID', 'TH']);
 
 /** Procédures publiées dans les tableaux de codage de l'eAIP France (non disponibles ailleurs) */
 /** Procédures publiées : eAIP France, AIXM du DECEA au Brésil, sector files IVAO dans les autres pays des Amériques */
@@ -102,7 +102,9 @@ async function fetchEaipProcedures(airport: Airport): Promise<AirportProcedures 
     return res.ok ? res.json() : null;
   }
   // Aérodromes du SIA : métropole et outre-mer (voir server/sia.ts)
-  const ident = /^(LF|TF|SO|FM|NW|NL|NT)[A-Z]{2}$/.test(airport.icao) ? airport.icao : SECTOR_FILE_COUNTRIES.has(airport.country) ? airport.icao || airport.ident : null;
+  // Tout aérodrome doté d'un code OACI (le serveur répond 404 sans procédures) ; sans code, les petits terrains couverts
+  // par les sector files (identifiant FAA…)
+  const ident = /^[A-Z]{4}$/.test(airport.icao) ? airport.icao : SECTOR_FILE_COUNTRIES.has(airport.country) ? airport.icao || airport.ident : null;
   if (!ident || !/^[A-Z0-9]{3,4}$/.test(ident)) return null;
   const res = await fetch(`/api/procedures/${ident}`);
   return res.ok ? res.json() : null;

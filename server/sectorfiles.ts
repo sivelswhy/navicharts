@@ -1,8 +1,12 @@
-// Sector files Aurora des divisions IVAO des Amériques qui les publient sur GitHub :
+// Sector files Aurora des divisions IVAO qui les publient sur GitHub (Amériques, Asie) :
 //   États-Unis : https://github.com/IVAO-US/SectorFiles (navdata « Keyvan Aviation »), à chaque cycle AIRAC
 //   Canada :     https://github.com/IVAO-Canada/SectorFiles (GPL-3.0), à chaque cycle AIRAC
 //   Équateur :   https://github.com/IVAO-Ecuador/IVAO-SectorFile (mis à jour début 2024)
 //   Uruguay :    https://github.com/Miguel22247/Aurora-Sector-File (2024)
+//   Japon :      https://github.com/NightFalconS/RJJJ-AuroraSectorFile
+//   Singapour :  https://github.com/NightFalconS/WSJCAuroraSectorFile
+//   Indonésie :  https://github.com/IVAOID/ID-Sectorfile (GPL-3.0)
+//   Thaïlande :  https://github.com/ivaoth/sector-file
 // Les autres divisions d'Amérique du Sud (Brésil, Argentine, Chili, Pérou, Colombie…) ne publient pas les leurs.
 // Selon la division, les fichiers sont rangés et nommés différemment (.ap / .apt, .awh / .awy…) et les coordonnées
 // sont décimales ou en degrés-minutes-secondes (« S000.26.41.800 »).
@@ -16,7 +20,8 @@
 //     « POINT;POINT;<br> » lève le crayon, « POINT;POINT;contrainte » trace jusqu'au point, « lat;lon » point sans nom
 //   plan au sol : .tfl polygones (« STATIC;TYPE;… » puis « lat;lon »), .geo segments (« lat;lon;lat;lon;TYPE »),
 //     .txi étiquettes de taxiway et .gts postes (« texte;aérodrome;lat;lon »)
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { existsSync, readdirSync } from 'node:fs';
+import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { GroundFeature } from './ground.ts';
 import type { Approach, AirportProcedures, Procedure } from './procedures.ts';
@@ -27,10 +32,12 @@ export interface Division {
   name: string;
   /** Code pays ISO des aérodromes de la division */
   country: string;
-  /** Continent OurAirports des aérodromes de la division (NA, SA) */
+  /** Continent OurAirports des aérodromes de la division (NA, SA, AS) */
   continent: string;
   repo: string;
   branch: string;
+  /** Dossier local (sector file copié depuis Aurora) : remplace le dépôt GitHub */
+  local?: string;
 }
 
 export const DIVISIONS: Division[] = [
@@ -38,7 +45,35 @@ export const DIVISIONS: Division[] = [
   { name: 'Canada', country: 'CA', continent: 'NA', repo: 'IVAO-Canada/SectorFiles', branch: 'main' },
   { name: 'Équateur', country: 'EC', continent: 'SA', repo: 'IVAO-Ecuador/IVAO-SectorFile', branch: 'master' },
   { name: 'Uruguay', country: 'UY', continent: 'SA', repo: 'Miguel22247/Aurora-Sector-File', branch: 'main' },
+  { name: 'Japon', country: 'JP', continent: 'AS', repo: 'NightFalconS/RJJJ-AuroraSectorFile', branch: 'main' },
+  { name: 'Singapour', country: 'SG', continent: 'AS', repo: 'NightFalconS/WSJCAuroraSectorFile', branch: 'main' },
+  { name: 'Indonésie', country: 'ID', continent: 'AS', repo: 'IVAOID/ID-Sectorfile', branch: 'main' },
+  { name: 'Thaïlande', country: 'TH', continent: 'AS', repo: 'ivaoth/sector-file', branch: 'main' },
+  ...localDivisions(),
 ];
+
+/**
+ * Sector files copiés à la main depuis Aurora (usage personnel, jamais versionnés : `sector files/` est ignoré par git),
+ * un dossier par sector file dans `sector files/aurora/<nom>/` (le .isc et son dossier Include). Le pays des aérodromes
+ * vient d'OurAirports ; ceux qu'il ne connaît pas sont ignorés.
+ */
+function localDivisions(): Division[] {
+  const root = path.resolve(import.meta.dirname, '..', 'sector files', 'aurora');
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true })
+    // Les dossiers au format du cache d'Aurora (global.json) sont lus par aurora.ts
+    .filter((d) => d.isDirectory() && !d.name.startsWith('.') && !existsSync(path.join(root, d.name, 'global.json')))
+    .map((d) => ({ name: d.name, country: '', continent: '', repo: `local/${d.name}`, branch: '', local: path.join(root, d.name) }));
+}
+
+/** Fichiers d'un dossier local, chemins relatifs avec « / » */
+async function listLocal(dir: string, prefix = ''): Promise<string[]> {
+  const entries = await readdir(path.join(dir, prefix), { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map((e) => (e.isDirectory() ? listLocal(dir, path.posix.join(prefix, e.name)) : Promise.resolve([path.posix.join(prefix, e.name)]))),
+  );
+  return nested.flat();
+}
 
 const CACHE_DIR = path.resolve(import.meta.dirname, '..', '.cache', 'sectorfiles');
 const CACHE_MAX_AGE_MS = 24 * 3600 * 1000;
@@ -62,6 +97,7 @@ const trees = new Map<string, Promise<string[]>>();
 
 /** Chemins de tous les fichiers du dépôt */
 export function repoFiles(division: Division): Promise<string[]> {
+  if (division.local) return listLocal(division.local);
   let entry = trees.get(division.repo);
   if (!entry) {
     entry = cached(path.join(CACHE_DIR, division.repo, 'tree.json'), async () => {
@@ -80,6 +116,13 @@ export function repoFiles(division: Division): Promise<string[]> {
 
 /** Contenu d'un fichier du dépôt */
 export function sectorText(division: Division, file: string): Promise<string> {
+  // Fichiers d'Aurora : UTF-8 ou Windows-1252 selon la division
+  if (division.local) {
+    return readFile(path.join(division.local, file)).then((buf) => {
+      const utf8 = buf.toString('utf8');
+      return utf8.includes('\uFFFD') ? buf.toString('latin1') : utf8;
+    });
+  }
   return cached(path.join(CACHE_DIR, division.repo, file), async () => {
     const res = await fetch(`https://raw.githubusercontent.com/${division.repo}/${division.branch}/${file}`, { headers: USER_AGENT });
     if (!res.ok) throw new Error(`${file} : HTTP ${res.status}`);
@@ -295,7 +338,7 @@ const APPROACH_TYPES: Record<string, string> = {
 const APPROACH_WORDS: Record<string, string> = { ILS: 'ILS', LOC: 'LOC', RNV: 'RNAV', RNP: 'RNP', VOR: 'VOR', NDB: 'NDB', GPS: 'GPS', LDA: 'LDA', BC: 'LOC BC' };
 
 /** « I01C » → ILS, « R01CY » → RNAV Y, « RNV06LX » → RNAV X, « ILS Z » → ILS Z ; null si ce n'est pas une approche */
-function approachName(code: string): string | null {
+export function approachName(code: string): string | null {
   const m = /^([A-Z]{1,3})(\d{2}[LRC]?)-?([A-Z])?$/.exec(code);
   const type = m && (m[1].length === 1 ? APPROACH_TYPES[m[1]] : APPROACH_WORDS[m[1]]);
   if (type) return [type, m[3]].filter(Boolean).join(' ');
