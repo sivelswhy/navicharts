@@ -366,7 +366,30 @@ async function main() {
     });
   // Brésil : le DECEA fait foi pour les routes, points, balises et espaces ; les sector files Aurora ne s'ajoutent qu'à défaut
   const notBrazil = (f: { properties: Record<string, unknown> }) => !decea || !f.properties.brazil;
-  const navaidFeatures = [...aipNavaids, ...ourNavaids, ...(ivao?.navaids.filter(notBrazil) ?? []), ...(decea?.navaids ?? [])];
+  // Ailleurs, les eAIP (SIA, pays européens, Asie) font foi de la même façon, mais les sector files débordent des frontières :
+  // un point, une balise ou un tronçon qui double une donnée officielle (même nom, à moins de ~3 km) est écarté
+  type Geo = { geometry: { coordinates: unknown }; properties: Record<string, unknown> };
+  const near = (a: number[], b: number[]) => Math.abs(a[0] - b[0]) < 0.03 && Math.abs(a[1] - b[1]) < 0.03;
+  const byName = (list: Geo[], key: string, vertices: (f: Geo) => number[][]) => {
+    const index = new Map<string, number[][]>();
+    for (const f of list) {
+      const name = String(f.properties[key]);
+      index.set(name, [...(index.get(name) ?? []), ...vertices(f)]);
+    }
+    return index;
+  };
+  const officialPoint = (list: Geo[]) => {
+    const index = byName(list, 'ident', (f) => [f.geometry.coordinates as number[]]);
+    return (f: Geo) => !(index.get(String(f.properties.ident)) ?? []).some((p) => near(p, f.geometry.coordinates as number[]));
+  };
+  const notOfficialNavaid = officialPoint([...aipNavaids, ...ourNavaids, ...(decea?.navaids ?? [])] as Geo[]);
+  const notOfficialWaypoint = officialPoint([...(aip?.waypoints ?? []), ...enr.waypoints, ...(decea?.waypoints ?? [])] as Geo[]);
+  const officialAirways = byName([...(aip?.airways ?? []), ...enr.airways, ...(decea?.airways ?? [])] as Geo[], 'name', (f) => f.geometry.coordinates as number[][]);
+  const notOfficialAirway = (f: Geo) => {
+    const vertices = officialAirways.get(String(f.properties.name)) ?? [];
+    return !(f.geometry.coordinates as number[][]).every((c) => vertices.some((v) => near(v, c)));
+  };
+  const navaidFeatures = [...aipNavaids, ...ourNavaids, ...(ivao?.navaids.filter(notBrazil).filter(notOfficialNavaid) ?? []), ...(decea?.navaids ?? [])];
   const collection = (list: unknown[]) => JSON.stringify({ type: 'FeatureCollection', features: list });
 
   await writeFile(path.join(OUT_DIR, 'airports.geojson'), JSON.stringify({ type: 'FeatureCollection', features }));
@@ -379,8 +402,8 @@ async function main() {
   await writeFile(path.join(OUT_DIR, 'navaids.geojson'), collection(navaidFeatures));
   await writeFile(path.join(OUT_DIR, 'runways.geojson'), collection(runwayFeatures));
   await writeFile(path.join(OUT_DIR, 'runway-ends.geojson'), collection(runwayEndFeatures));
-  const waypointFeatures = [...(aip?.waypoints ?? []), ...enr.waypoints, ...(ivao?.waypoints.filter(notBrazil) ?? []), ...(decea?.waypoints ?? [])];
-  const airwayFeatures = [...(aip?.airways ?? []), ...enr.airways, ...(ivao?.airways.filter(notBrazil) ?? []), ...(decea?.airways ?? [])];
+  const waypointFeatures = [...(aip?.waypoints ?? []), ...enr.waypoints, ...(ivao?.waypoints.filter(notBrazil).filter(notOfficialWaypoint) ?? []), ...(decea?.waypoints ?? [])];
+  const airwayFeatures = [...(aip?.airways ?? []), ...enr.airways, ...(ivao?.airways.filter(notBrazil).filter(notOfficialAirway) ?? []), ...(decea?.airways ?? [])];
   await writeFile(path.join(OUT_DIR, 'waypoints.geojson'), collection(waypointFeatures));
   await writeFile(path.join(OUT_DIR, 'airways.geojson'), collection(airwayFeatures));
   await writeFile(path.join(OUT_DIR, 'airspaces.geojson'), collection([...(aip?.airspaces ?? []), ...(ivao?.airspaces.filter(notBrazil) ?? []), ...(decea?.airspaces ?? [])]));
