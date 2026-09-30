@@ -189,9 +189,10 @@ const scoped = (f?: FilterSpecification) => (AUTOROUTER ? filter(f ? ['all', AME
 const onlyIvaoInDev = AUTOROUTER ? { filter: scoped() } : {};
 
 // Importance d'un aérodrome → zoom à partir duquel il est affiché
+// Rien à l'échelle d'un continent : les aérodromes IFR apparaissent à celle d'un pays
 const AIRPORT_VISIBLE = filter([
   'any',
-  ['get', 'ifr'],
+  ['all', ['get', 'ifr'], ['>=', ['zoom'], 5]],
   ['all', ['in', ['get', 'type'], ['literal', ['large_airport', 'medium_airport']]], ['>=', ['zoom'], 6.5]],
   ['all', ['in', ['get', 'type'], ['literal', ['small_airport', 'seaplane_base']]], ['>=', ['zoom'], 8]],
   ['>=', ['zoom'], 10],

@@ -108,6 +108,8 @@ export function App() {
     }
   });
   const [flightRoute, setFlightRoute] = useState<FlightRoute | null>(null);
+  // Approche choisie dans le panneau de vol (le texte de la route ne la mentionne pas)
+  const approachRef = useRef<string | null>(null);
   const [mapFocus, setMapFocus] = useState<{ lngLat: LngLat; label?: string } | null>(null);
   // SID et STAR choisies dans la fiche de l'aérodrome, tracées sur la carte
   const [procedureFeatures, setProcedureFeatures] = useState<FeatureCollection | null>(null);
@@ -122,7 +124,7 @@ export function App() {
     }
     setRouteStatus('loading');
     try {
-      setFlightRoute(await parseRoute(text));
+      setFlightRoute(await parseRoute(text, { approach: approachRef.current }));
       setRouteStatus('idle');
     } catch {
       setRouteStatus('error');
@@ -200,6 +202,7 @@ export function App() {
   const changeRoute = useCallback(
     (change: RouteChange) => {
       if (!flightRoute) return;
+      if (change.approach !== undefined) approachRef.current = change.approach;
       const text = editRoute(routeText, flightRoute, change);
       setRouteText(text);
       traceRoute(text);

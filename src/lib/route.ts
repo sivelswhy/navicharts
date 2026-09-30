@@ -62,6 +62,10 @@ export interface FlightRoute {
   starOptions: Procedure[];
   departureRunways: string[];
   arrivalRunways: string[];
+  /** Approche choisie (nom : « ILS Z »), tracée, et choix possibles pour la piste d'arrivée */
+  approach: string | null;
+  approachUsed: Approach | null;
+  approachOptions: Approach[];
 }
 
 // ───────── SID et STAR ─────────
@@ -238,6 +242,8 @@ function loadNavData(): Promise<NavData> {
     const byIdent = new Map<string, Candidate[]>();
     const identAt = new Map<string, string>();
     const add = (ident: string, c: Candidate) => {
+      // Coordonnées invalides (donnée source défectueuse) : ignorées plutôt que de bloquer toute l'analyse
+      if (!Number.isFinite(c.lngLat?.[0]) || !Number.isFinite(c.lngLat?.[1])) return;
       byIdent.set(ident, [...(byIdent.get(ident) ?? []), c]);
       identAt.set(key(c.lngLat), ident);
     };
@@ -249,6 +255,7 @@ function loadNavData(): Promise<NavData> {
 
     const graph = new Map<string, Map<string, string[]>>();
     for (const f of airways) {
+      if (!f.geometry.coordinates.flat().every(Number.isFinite)) continue;
       const [a, b] = f.geometry.coordinates.map(key);
       // Extrémités nommées dans l'eAIP (balises aux coordonnées légèrement différentes de celles de la base)
       if (f.properties.from && !identAt.has(a)) identAt.set(a, f.properties.from);
@@ -278,15 +285,25 @@ async function withAutorouter(base: NavData, departure: Terminal | null, arrival
   const margin = ends.length === 1 ? 4 : 1.5;
   const lons = ends.map((e) => e[0]);
   const lats = ends.map((e) => e[1]);
-  const bbox = [Math.min(...lons) - margin, Math.min(...lats) - margin, Math.max(...lons) + margin, Math.max(...lats) + margin];
+  // Autorouter ne couvre que l'Europe : zone limitée à celle-ci (un vol Paris–Pékin dépasserait sinon le nombre de
+  // tuiles admis par le serveur, et aucune donnée ne viendrait)
+  const bbox = [
+    Math.max(Math.min(...lons) - margin, -32),
+    Math.max(Math.min(...lats) - margin, 34),
+    Math.min(Math.max(...lons) + margin, 45),
+    Math.min(Math.max(...lats) + margin, 72),
+  ];
+  if (bbox[0] >= bbox[2] || bbox[1] >= bbox[3]) return base;
   const res = await fetch(`/dev/autorouter/nav?bbox=${bbox.map((n) => n.toFixed(2)).join(',')}`).catch(() => null);
   const data: AutorouterNav | null = res?.ok ? await res.json() : null;
   if (!data) return base;
 
-  // Nos points de report (eAIP France) sont en veille pendant les tests : seuls ceux d'autorouter servent
+  // Nos points de report d'Europe sont en veille pendant les tests (autorouter les remplace) ; ceux d'ailleurs
+  // (Asie, Amériques, outre-mer) restent, autorouter ne couvrant que l'Europe
+  const inEurope = ([lon, lat]: LngLat) => lat > 34 && lat < 72 && lon > -32 && lon < 45;
   const byIdent = new Map<string, Candidate[]>();
   for (const [ident, candidates] of base.byIdent) {
-    const kept = candidates.filter((c) => c.kind !== 'waypoint');
+    const kept = candidates.filter((c) => c.kind !== 'waypoint' || !inEurope(c.lngLat));
     if (kept.length) byIdent.set(ident, kept);
   }
   const identAt = new Map(base.identAt);
@@ -296,13 +313,11 @@ async function withAutorouter(base: NavData, departure: Terminal | null, arrival
     if (p.kind === 'airport' || known(p.ident, p.lngLat)) continue;
     byIdent.set(p.ident, [...(byIdent.get(p.ident) ?? []), { kind: p.kind, lngLat: p.lngLat, name: p.name }]);
   }
-  const airways = new Map(base.airways);
-  const replaced = new Set<string>();
+  // Tronçons autorouter ajoutés aux routes du même nom : un même nom peut désigner une autre route sur un autre
+  // continent (N161, M11…), qu'il ne faut pas effacer
+  const airways = new Map([...base.airways].map(([name, g]) => [name, new Map(g)]));
   for (const s of data.airways) {
-    if (!replaced.has(s.name)) {
-      airways.set(s.name, new Map());
-      replaced.add(s.name);
-    }
+    if (!airways.has(s.name)) airways.set(s.name, new Map());
     const [a, b] = [key(s.from), key(s.to)];
     identAt.set(a, s.fromIdent);
     identAt.set(b, s.toIdent);
@@ -339,10 +354,46 @@ const PROCEDURE = /^[A-Z]{2,5}\d[A-Z]?$/;
 const AIRWAY = /^[A-Z]{1,2}\d{1,4}[A-Z]?$/;
 const COORDINATES = /^(\d{2})(\d{2})?([NS])(\d{3})(\d{2})?([EW])$/;
 const TERMINAL = /^([A-Z]{4})(?:\/([0-9]{2}[LRC]?))?$/;
-// Au-delà, un point nommé est sans doute un homonyme d'un point hors de nos données (autre continent)
-const MAX_NAMED_LEG_NM = 600;
+// Au-delà, le plus proche de plusieurs homonymes est sans doute sur un autre continent ; un point unique est toujours
+// retenu (la route peut traverser des pays sans données : le point précédent est alors loin)
+const MAX_NAMED_LEG_NM = 2500;
 // Au-delà, l'avion suivi n'est plus sur la partie tracée de la route
 const OFF_ROUTE_NM = 30;
+
+// ───────── Tracks de l'Atlantique Nord ─────────
+
+type NatPoint = { ident: string } | { lngLat: LngLat; token: string };
+interface NatMessageTrack {
+  letter: string;
+  points: NatPoint[];
+  validFrom: string;
+  validTo: string;
+}
+
+let natTracks: Promise<NatMessageTrack[]> | null = null;
+
+/** Tracks NAT publiés (en vigueur et à venir), relus au plus tous les quarts d'heure */
+function loadNatTracks(): Promise<NatMessageTrack[]> {
+  natTracks ??= fetch('/api/nat')
+    .then((res) => (res.ok ? (res.json() as Promise<{ tracks: NatMessageTrack[] }>) : { tracks: [] }))
+    .then((d) => d.tracks, () => []);
+  const current = natTracks;
+  setTimeout(() => natTracks === current && (natTracks = null), 15 * 60 * 1000);
+  return natTracks;
+}
+
+/** Track de cette lettre : celui en vigueur, sinon le prochain */
+async function natTrack(letter: string): Promise<NatMessageTrack | null> {
+  const now = Date.now();
+  const same = (await loadNatTracks()).filter((t) => t.letter === letter).sort((a, b) => a.validFrom.localeCompare(b.validFrom));
+  return same.find((t) => Date.parse(t.validFrom) <= now && now < Date.parse(t.validTo)) ?? same.find((t) => Date.parse(t.validFrom) > now) ?? null;
+}
+
+/** « 62/20 » (degrés), « 6230/30 » (degrés et minutes) → « 62N020W », forme plan de vol */
+const natLabel = (token: string) => {
+  const [lat, lon] = token.split('/');
+  return `${lat.slice(0, 2)}${lat.slice(2) || ''}N${lon.padStart(3, '0')}W`;
+};
 
 function parseCoordinates(token: string): LngLat | null {
   const m = COORDINATES.exec(token);
@@ -362,7 +413,7 @@ async function terminalPoint(t: Terminal): Promise<RoutePoint> {
   return { ident: `${fallback.ident} ${t.runway}`, kind: 'runway', lngLat: [end.lon, end.lat], name: t.airport.name };
 }
 
-export async function parseRoute(text: string): Promise<FlightRoute> {
+export async function parseRoute(text: string, options: { approach?: string | null } = {}): Promise<FlightRoute> {
   const base = await loadNavData();
   const tokens = text.toUpperCase().replace(/[()-]/g, ' ').split(/\s+/).filter(Boolean);
 
@@ -397,6 +448,9 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
     starOptions: [],
     departureRunways: [],
     arrivalRunways: [],
+    approach: options.approach ?? null,
+    approachUsed: null,
+    approachOptions: [],
   };
 
   const points: { point: RoutePoint; via: string }[] = [];
@@ -410,7 +464,7 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
     if (!candidates?.length) return null;
     // Identifiants homonymes : on retient le plus proche du point précédent, s'il est plausible
     const best = previous ? candidates.reduce((a, b) => (distanceNm(previous!, a.lngLat) <= distanceNm(previous!, b.lngLat) ? a : b)) : candidates[0];
-    if (previous && best.kind !== 'airport' && distanceNm(previous, best.lngLat) > MAX_NAMED_LEG_NM) return null;
+    if (previous && candidates.length > 1 && best.kind !== 'airport' && distanceNm(previous, best.lngLat) > MAX_NAMED_LEG_NM) return null;
     return { ident, ...best };
   };
 
@@ -448,6 +502,36 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
       route.star = token;
       continue;
     }
+    // Track de l'Atlantique Nord (« NATB ») : ses points, du point d'entrée au point de sortie
+    if (/^NAT[A-Z]$/.test(token)) {
+      const track = await natTrack(token.slice(3));
+      const entry = points.at(-1)?.point.ident;
+      const exitIdent = tokens[i + 1]?.split('/')[0];
+      const named = (p: NatPoint) => ('ident' in p ? p.ident : null);
+      const list = track?.points ?? [];
+      const from = list.findIndex((p) => named(p) === entry);
+      const to = list.findIndex((p) => named(p) === exitIdent);
+      if (track && to >= 0) {
+        // Entrée absente du track : depuis son premier point (dans le sens du vol)
+        const start = from >= 0 ? from : to > 0 ? 0 : list.length - 1;
+        const step = to >= start ? 1 : -1;
+        for (let k = start + (from >= 0 ? step : 0); k !== to + step; k += step) {
+          const p = list[k];
+          const point: RoutePoint | null = 'ident' in p ? resolve(p.ident) : { ident: natLabel(p.token), kind: 'coordinates', lngLat: p.lngLat };
+          if (point) push(point, token);
+        }
+        i++; // le point de sortie a été ajouté
+        continue;
+      }
+      route.notes.push(
+        track
+          ? `Track NAT ${token.slice(3)} du jour : ne passe pas par ${exitIdent ?? '—'} (les tracks changent deux fois par jour) : segment direct.`
+          : `Track NAT ${token.slice(3)} non publié actuellement : segment direct.`,
+      );
+      pendingVia = token;
+      continue;
+    }
+
     // Route aérienne : on la déroule jusqu'au point de sortie
     const graph = AIRWAY.test(token) ? nav.airways.get(token) : undefined;
     const exit = tokens[i + 1]?.split('/')[0];
@@ -490,6 +574,8 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
   route.arrivalRunways = arrivalRunways;
   route.sidOptions = procedureOptions(depProcedures, 'SID', departure?.runway ?? null, route.sidFix);
   route.starOptions = procedureOptions(arrProcedures, 'STAR', arrival?.runway ?? null, route.starFix);
+  // Approches de la piste d'arrivée (« 04L-04R » : plusieurs pistes)
+  route.approachOptions = (arrProcedures?.approaches ?? []).filter((a) => !arrival?.runway || a.runway.split('-').includes(arrival.runway));
 
   /** Points d'une procédure, localisés d'après ses propres coordonnées puis les données en route */
   const procedurePoints = (fixes: string[], data: AirportProcedures, near: LngLat): RoutePoint[] =>
@@ -529,7 +615,24 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
     ),
   );
 
-  // Arrivée : STAR publiée depuis le dernier point en route, puis segment jusqu'au seuil de piste
+  // Approche choisie : branche initiale partant du dernier point atteint (fin de STAR), puis finale jusqu'au seuil
+  const approach = route.approach ? route.approachOptions.find((a) => a.name === route.approach) ?? null : null;
+  route.approachUsed = approach;
+  if (route.approach && !approach) route.notes.push(`Approche ${route.approach} indisponible pour la piste ${arrival?.runway ?? '—'}.`);
+  const approachLabel = approach ? `${approach.name} ${approach.runway}` : 'APP';
+  const pushApproach = () => {
+    if (!approach || !end || !arrProcedures) return false;
+    const last = sequence.at(-1)?.point.ident;
+    const branch = approach.initial.find((b) => b.iaf === last);
+    const fixes = [...(branch ? branch.fixes.slice(1) : []), ...approach.final].filter((f, i, all) => f !== last && f !== all[i - 1] && !/^RW/.test(f));
+    for (const point of procedurePoints(fixes, arrProcedures, end.lngLat)) {
+      sequence.push({ point, via: approachLabel, style: 'procedure', phase: 'arrival' });
+    }
+    sequence.push({ point: end, via: approachLabel, style: 'procedure', phase: 'arrival' });
+    return true;
+  };
+
+  // Arrivée : STAR publiée depuis le dernier point en route, puis approche ou segment jusqu'au seuil de piste
   const star = route.star && arrProcedures ? findProcedure(arrProcedures, 'STAR', route.star, arrival!.runway, route.starFix) : null;
   route.starUsed = star?.procedure ?? null;
   if (star && end) {
@@ -537,21 +640,23 @@ export async function parseRoute(text: string): Promise<FlightRoute> {
     for (const point of procedurePoints(fixes, arrProcedures!, end.lngLat)) {
       sequence.push({ point, via: star.procedure.ident, style: 'procedure', phase: 'arrival' });
     }
-    sequence.push({ point: end, via: 'APP', style: 'approximate', phase: 'arrival' });
+    if (!pushApproach()) sequence.push({ point: end, via: 'APP', style: 'approximate', phase: 'arrival' });
     const note = substitutionNote('STAR', route.star!, star, arrival!.runway);
     if (note) route.notes.push(note);
   } else if (end) {
-    sequence.push({
-      point: end,
-      via: route.star ?? 'DCT',
-      style: route.star ? 'approximate' : 'route',
-      phase: route.star ? 'arrival' : 'enroute',
-    });
+    if (!pushApproach()) {
+      sequence.push({
+        point: end,
+        via: route.star ?? 'DCT',
+        style: route.star ? 'approximate' : 'route',
+        phase: route.star ? 'arrival' : 'enroute',
+      });
+    }
     if (route.star) {
       route.notes.push(
         arrProcedures
           ? `STAR ${route.star} introuvable pour la piste ${arrival?.runway ?? '—'} : segment direct.`
-          : `STAR ${route.star} : tracé exact disponible uniquement pour les aérodromes français (segment direct).`,
+          : `STAR ${route.star} : tracé exact non disponible pour cet aérodrome (segment direct).`,
       );
     }
   }
@@ -605,6 +710,8 @@ export function routeProgress(route: FlightRoute, position: LngLat): RouteProgre
 }
 
 export interface RouteChange {
+  /** Approche (nom), null pour la retirer : choix hors du texte de la route, qui ne la mentionne pas */
+  approach?: string | null;
   departureRunway?: string;
   arrivalRunway?: string;
   /** Nouvelle SID / STAR (désignation plan de vol), null pour la retirer */

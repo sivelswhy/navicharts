@@ -399,7 +399,9 @@ function buildAirports(loaded: Loaded[]) {
   for (const d of loaded) {
     for (const f of d.ap.flatMap((x) => x.rows)) {
       const [ident, elevation, transition, lat, lon, name] = f;
-      if (airports.has(ident) || !lat || !lon) continue;
+      // Coordonnées décimales ou en degrés-minutes-secondes (Équateur, Uruguay)
+      const [lonDeg, latDeg] = position(lat, lon);
+      if (airports.has(ident) || !Number.isFinite(latDeg) || !Number.isFinite(lonDeg)) continue;
       airports.set(ident, {
         ident,
         country: d.division.country,
@@ -407,8 +409,8 @@ function buildAirports(loaded: Loaded[]) {
         name: name ?? ident,
         elevationFt: Number(elevation),
         transitionAltitudeFt: Number(transition) || null,
-        lat: Number(lat),
-        lon: Number(lon),
+        lat: latDeg,
+        lon: lonDeg,
         procedures: d.procedures.has(ident),
       });
     }
@@ -417,12 +419,14 @@ function buildAirports(loaded: Loaded[]) {
   for (const f of all(loaded, 'rw')) {
     const [airport, id1, id2, elev1, elev2, hdg1, hdg2, lat1, lon1, lat2, lon2] = f;
     const key = `${airport} ${id1}/${id2}`;
-    if (runways.has(key) || !lat2) continue;
+    const [lonA, latA] = position(lat1, lon1);
+    const [lonB, latB] = position(lat2, lon2);
+    if (runways.has(key) || ![lonA, latA, lonB, latB].every(Number.isFinite)) continue;
     runways.set(key, {
       airport,
       ends: [
-        { ident: id1, elevationFt: Number(elev1), headingT: Number(hdg1), lat: Number(lat1), lon: Number(lon1) },
-        { ident: id2, elevationFt: Number(elev2), headingT: Number(hdg2), lat: Number(lat2), lon: Number(lon2) },
+        { ident: id1, elevationFt: Number(elev1), headingT: Number(hdg1), lat: latA, lon: lonA },
+        { ident: id2, elevationFt: Number(elev2), headingT: Number(hdg2), lat: latB, lon: lonB },
       ],
     });
   }

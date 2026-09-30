@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { IvaoFlightPlan, IvaoPilot } from '../lib/ivao.ts';
 import { GROUP_OF, groupColor } from '../lib/chartGroups.ts';
 import { fetchCharts } from '../lib/data.ts';
-import type { FlightRoute, Procedure, RouteChange, RouteProgress, Terminal } from '../lib/route.ts';
+import type { Approach, FlightRoute, Procedure, RouteChange, RouteProgress, Terminal } from '../lib/route.ts';
 import type { Chart } from '../lib/types.ts';
 import { WeatherSection } from './Weather.tsx';
 
@@ -173,6 +173,43 @@ function ProcedurePicker({
               <option key={o.ident} value={o.ident}>
                 {o.ident} · {kind === 'SID' ? `→ ${to}` : `${to} →`}
                 {to === transition ? ' ✓' : ''}
+              </option>
+            );
+          })}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+/** Approche de la piste d'arrivée ; ses branches initiales partent de l'IAF indiqué */
+function ApproachPicker({
+  options,
+  current,
+  transition,
+  onApproach,
+}: {
+  options: Approach[];
+  current: string | null;
+  transition: string | null;
+  onApproach: (name: string | null) => void;
+}) {
+  const listed = current && !options.some((o) => o.name === current);
+  return (
+    <div className="picker">
+      <span className="picker-airport" />
+      <label className="picker-field grow">
+        <span>Approche</span>
+        <select value={current ?? ''} onChange={(e) => onApproach(e.target.value || null)} disabled={!options.length && !current}>
+          <option value="">{options.length ? 'Aucune (direct au seuil)' : 'Pas d’approche disponible'}</option>
+          {listed && <option value={current}>{current}</option>}
+          {options.map((o) => {
+            const fromTransition = o.initial.some((b) => b.iaf === transition);
+            return (
+              <option key={`${o.name} ${o.runway}`} value={o.name}>
+                {o.name} {o.runway}
+                {o.initial.length ? ` · IAF ${[...new Set(o.initial.map((b) => b.iaf))].slice(0, 3).join(', ')}` : ''}
+                {fromTransition ? ' ✓' : ''}
               </option>
             );
           })}
@@ -373,6 +410,14 @@ export function FlightPanel({ text, onText, route, status, onShow, onClear, onSe
                   transition={route.starFix}
                   onRunway={(arrivalRunway) => onChange({ arrivalRunway })}
                   onProcedure={(star) => onChange({ star })}
+                />
+              )}
+              {route.arrival && (
+                <ApproachPicker
+                  options={route.approachOptions}
+                  current={route.approach}
+                  transition={route.starUsed ? route.starUsed.fixes.at(-1) ?? null : route.starFix}
+                  onApproach={(approach) => onChange({ approach })}
                 />
               )}
             </section>
